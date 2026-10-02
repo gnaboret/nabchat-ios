@@ -166,13 +166,14 @@ struct ContentView: View {
         .onAppear {
             restoreChannels()
             restoreSavedChatters()
-            liveChat.update(channels: channels)
             twitchAuth.validateSavedAuthorization()
+            refreshProviders()
         }
         .onChange(of: channels) {
             persistChannels($0)
-            liveChat.update(channels: $0)
+            refreshProviders()
         }
+        .onChange(of: twitchAuth.state) { _ in refreshProviders() }
         .sheet(isPresented: $showingSettings) {
             SettingsView(channels: $channels, liveChat: liveChat, twitchAuth: twitchAuth, coreStatus: SharedCoreInfo.shared.status())
         }
@@ -220,6 +221,10 @@ struct ContentView: View {
         guard !savedChatters.contains(where: { $0.username.caseInsensitiveCompare(message.username) == .orderedSame && $0.platform == message.channel.platform }) else { return }
         savedChatters.insert(SavedChatter(username: message.username, platform: message.channel.platform), at: 0)
         persistSavedChatters()
+    }
+
+    private func refreshProviders() {
+        liveChat.update(channels: channels, twitchToken: twitchAuth.accessToken, twitchUserID: twitchAuth.userID)
     }
 
     private var header: some View {
