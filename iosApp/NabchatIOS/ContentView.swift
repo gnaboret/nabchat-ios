@@ -23,7 +23,7 @@ private enum AppSection: String {
     }
 }
 
-private enum Platform: String, Codable, CaseIterable {
+enum Platform: String, Codable, CaseIterable {
     case kick, twitch, youtube
     var color: Color {
         switch self {
@@ -34,7 +34,7 @@ private enum Platform: String, Codable, CaseIterable {
     }
 }
 
-private struct Channel: Identifiable, Hashable, Codable {
+struct Channel: Identifiable, Hashable, Codable {
     let id: UUID
     let name: String
     let shortName: String
@@ -48,16 +48,26 @@ private struct Channel: Identifiable, Hashable, Codable {
     }
 }
 
-private struct ChatMessage: Identifiable {
+struct ChatMessage: Identifiable {
     let id = UUID()
     let channel: Channel
     let username: String
     let text: String
     let time: String
     let badge: String?
+    let sourceID: String
+
+    init(channel: Channel, username: String, text: String, time: String, badge: String?, sourceID: String = UUID().uuidString) {
+        self.channel = channel
+        self.username = username
+        self.text = text
+        self.time = time
+        self.badge = badge
+        self.sourceID = sourceID
+    }
 }
 
-private enum NabColors {
+enum NabColors {
     static let background = Color(red: 0.035, green: 0.045, blue: 0.040)
     static let surface = Color(red: 0.075, green: 0.095, blue: 0.082)
     static let raised = Color(red: 0.145, green: 0.135, blue: 0.165)
@@ -79,6 +89,7 @@ struct ContentView: View {
 
     @AppStorage("savedChannels") private var savedChannels = ""
     @State private var channels = starterChannels
+    @StateObject private var liveChat = LiveChatService()
     @State private var mode: ChatMode = .river
     @State private var section: AppSection = .chat
     @State private var selectedChannels: Set<UUID> = []
@@ -86,6 +97,7 @@ struct ContentView: View {
     @State private var showingAddChannel = false
 
     private var messages: [ChatMessage] {
+        if !liveChat.messages.isEmpty { return liveChat.messages }
         let examples: [(String, String, String?)] = [
             ("cardlo", "CJ is a man with character", "SUB ×3"),
             ("hoodneighbour", "this layout is looking clean", nil),
@@ -129,8 +141,14 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .onAppear(perform: restoreChannels)
-        .onChange(of: channels) { persistChannels($0) }
+        .onAppear {
+            restoreChannels()
+            liveChat.update(channels: channels)
+        }
+        .onChange(of: channels) {
+            persistChannels($0)
+            liveChat.update(channels: $0)
+        }
         .sheet(isPresented: $showingSettings) {
             SettingsView(channels: $channels, coreStatus: SharedCoreInfo.shared.status())
         }
@@ -170,8 +188,9 @@ struct ContentView: View {
                     .background(NabColors.raised, in: Circle())
             }
             HStack(spacing: 7) {
-                Circle().fill(NabColors.green).frame(width: 9, height: 9)
-                Text("CONNECTED").font(.system(size: 12, weight: .medium, design: .serif))
+                Circle().fill(liveChat.isConnected ? NabColors.green : NabColors.secondary).frame(width: 9, height: 9)
+                Text(liveChat.isConnected ? "CONNECTED" : "CONNECTING")
+                    .font(.system(size: 12, weight: .medium, design: .serif))
             }
             .foregroundStyle(NabColors.text)
             .padding(.horizontal, 14)
