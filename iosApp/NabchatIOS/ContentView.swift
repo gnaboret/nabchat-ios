@@ -1,5 +1,6 @@
 import SwiftUI
 import NabchatShared
+import UIKit
 
 private enum ChatMode: String, CaseIterable {
     case river = "RIVER", rooms = "ROOMS", rug = "RUG"
@@ -68,6 +69,22 @@ struct ChatMessage: Identifiable, Codable {
     }
 }
 
+private struct SavedChatter: Identifiable, Codable, Hashable {
+    let id: UUID
+    let username: String
+    let platform: Platform
+    var colorIndex: Int
+    let savedAt: Date
+
+    init(id: UUID = UUID(), username: String, platform: Platform, colorIndex: Int = 0, savedAt: Date = Date()) {
+        self.id = id
+        self.username = username
+        self.platform = platform
+        self.colorIndex = colorIndex
+        self.savedAt = savedAt
+    }
+}
+
 enum NabColors {
     static let background = Color(red: 0.035, green: 0.045, blue: 0.040)
     static let surface = Color(red: 0.075, green: 0.095, blue: 0.082)
@@ -89,13 +106,16 @@ struct ContentView: View {
     ]
 
     @AppStorage("savedChannels") private var savedChannels = ""
+    @AppStorage("savedChatters") private var savedChattersData = ""
     @State private var channels = starterChannels
+    @State private var savedChatters: [SavedChatter] = []
     @StateObject private var liveChat = LiveChatService()
     @State private var mode: ChatMode = .river
     @State private var section: AppSection = .chat
     @State private var selectedChannels: Set<UUID> = []
     @State private var showingSettings = false
     @State private var showingAddChannel = false
+    @State private var inspectedMessage: ChatMessage?
 
     private var messages: [ChatMessage] {
         if !liveChat.messages.isEmpty { return liveChat.messages }
@@ -132,8 +152,8 @@ struct ContentView: View {
                 Group {
                     switch section {
                     case .chat: chatContent
-                    case .chatters: placeholder(title: "Saved Chatters", icon: "person.2")
-                    case .analytics: placeholder(title: "Channel Analytics", icon: "chart.xyaxis.line")
+                    case .chatters: savedChattersView
+                    case .analytics: analyticsView
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -144,6 +164,7 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             restoreChannels()
+            restoreSavedChatters()
             liveChat.update(channels: channels)
         }
         .onChange(of: channels) {
@@ -157,6 +178,11 @@ struct ContentView: View {
             AddChannelView { channel in
                 channels.append(channel)
                 selectedChannels = [channel.id]
+            }
+        }
+        .sheet(item: $inspectedMessage) { message in
+            MessageDetailView(message: message, isSaved: savedChatters.contains { $0.username.caseInsensitiveCompare(message.username) == .orderedSame && $0.platform == message.channel.platform }) {
+                saveChatter(from: message)
             }
         }
     }
@@ -174,6 +200,24 @@ struct ContentView: View {
               let encoded = String(data: data, encoding: .utf8)
         else { return }
         savedChannels = encoded
+    }
+
+    private func restoreSavedChatters() {
+        guard let data = savedChattersData.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([SavedChatter].self, from: data) else { return }
+        savedChatters = decoded
+    }
+
+    private func persistSavedChatters() {
+        guard let data = try? JSONEncoder().encode(savedChatters),
+              let encoded = String(data: data, encoding: .utf8) else { return }
+        savedChattersData = encoded
+    }
+
+    private func saveChatter(from message: ChatMessage) {
+        guard !savedChatters.contains(where: { $0.username.caseInsensitiveCompare(message.username) == .orderedSame && $0.platform == message.channel.platform }) else { return }
+        savedChatters.insert(SavedChatter(username: message.username, platform: message.channel.platform), at: 0)
+        persistSavedChatters()
     }
 
     private var header: some View {
@@ -238,7 +282,9 @@ struct ContentView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(visibleMessages) { MessageRow(message: $0).id($0.id) }
+                        ForEach(visibleMessages) { message in
+                            MessageRow(message: message) { inspectedMessage = message }.id(message.id)
+                        }
                     }
                 }
                 .onAppear { if let last = visibleMessages.last { proxy.scrollTo(last.id, anchor: .bottom) } }
@@ -283,6 +329,103 @@ struct ContentView: View {
         .padding(.horizontal, 34).padding(.top, 8).padding(.bottom, 7)
     }
 
+    private var savedChattersView: some View {
+        Group {
+            if savedChatters.isEmpty {
+                placeholder(title: "Saved Chatters", icon: "person.2")
+            } else {
+                List {
+                    ForEach($savedChatters) { $chatter in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Circle().fill(chatter.platform.color).frame(width: 10, height: 10)
+                                Text(chatter.username).font(.system(size: 19, weight: .semibold, design: .serif))
+                                Spacer()
+                                Text(chatter.platform.rawValue.uppercased()).font(.caption2).foregroundStyle(chatter.platform.color)
+                            }
+                            let count = liveChat.messages.filter { $0.username.caseInsensitiveCompare(chatter.username) == .orderedSame && $0.channel.platform == chatter.platform }.count
+                            Text("\(count) saved messages on this device")
+                                .font(.caption).foregroundStyle(NabColors.secondary)
+                            HStack(spacing: 12) {
+                                ForEach(0..<6) { index in
+                                    Circle().fill(chatterColor(index)).frame(width: 22, height: 22)
+                                        .overlay(Circle().stroke(Color.white, lineWidth: chatter.colorIndex == index ? 2 : 0))
+                                        .onTapGesture {
+                                            chatter.colorIndex = index
+                                            persistSavedChatters()
+                                        }
+                                }
+                            }
+                        }
+                        .padding(.vertical, 7)
+                        .listRowBackground(NabColors.surface)
+                    }
+                    .onDelete {
+                        savedChatters.remove(atOffsets: $0)
+                        persistSavedChatters()
+                    }
+                }
+                .listStyle(.plain)
+            }
+        }
+    }
+
+    private var analyticsView: some View {
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                HStack {
+                    metricCard("MESSAGES", value: "\(liveChat.messages.count)", icon: "text.bubble")
+                    metricCard("CHATTERS", value: "\(Set(liveChat.messages.map { $0.username.lowercased() }).count)", icon: "person.2")
+                }
+                ForEach(channels) { channel in
+                    let channelMessages = liveChat.messages.filter { $0.channel.id == channel.id || ($0.channel.name == channel.name && $0.channel.platform == channel.platform) }
+                    let unique = Set(channelMessages.map { $0.username.lowercased() }).count
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Circle().fill(channel.platform.color).frame(width: 10, height: 10)
+                            Text(channel.name).font(.system(size: 18, design: .serif))
+                            Spacer()
+                            Text(channel.platform.rawValue.uppercased()).font(.caption2).foregroundStyle(channel.platform.color)
+                        }
+                        HStack {
+                            Label("\(unique) chatters", systemImage: "person.2")
+                            Spacer()
+                            Label("\(channelMessages.count) messages", systemImage: "text.bubble")
+                        }
+                        .font(.caption).foregroundStyle(NabColors.secondary)
+                        GeometryReader { geometry in
+                            RoundedRectangle(cornerRadius: 3).fill(NabColors.raised).frame(height: 6)
+                            RoundedRectangle(cornerRadius: 3).fill(channel.platform.color)
+                                .frame(width: geometry.size.width * activityFraction(channelMessages.count), height: 6)
+                        }.frame(height: 6)
+                    }
+                    .padding(14).background(NabColors.surface, in: RoundedRectangle(cornerRadius: 15))
+                }
+            }.padding(14)
+        }
+    }
+
+    private func metricCard(_ title: String, value: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: icon).foregroundStyle(NabColors.green)
+            Text(value).font(.title2.bold())
+            Text(title).font(.caption2).foregroundStyle(NabColors.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading).padding(14)
+        .background(NabColors.surface, in: RoundedRectangle(cornerRadius: 15))
+    }
+
+    private func activityFraction(_ count: Int) -> CGFloat {
+        let maximum = max(1, channels.map { channel in
+            liveChat.messages.filter { $0.channel.name == channel.name && $0.channel.platform == channel.platform }.count
+        }.max() ?? 1)
+        return CGFloat(count) / CGFloat(maximum)
+    }
+
+    private func chatterColor(_ index: Int) -> Color {
+        [NabColors.green, NabColors.purple, NabColors.youtube, .orange, .cyan, .pink][index % 6]
+    }
+
     private func navButton(_ item: AppSection) -> some View {
         Button {
             if item == .chat && section == .chat { selectedChannels.removeAll() }
@@ -309,8 +452,10 @@ struct ContentView: View {
 
 private struct MessageRow: View {
     let message: ChatMessage
+    let action: () -> Void
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 10) {
             Circle().fill(message.channel.platform.color.opacity(0.28)).frame(width: 39, height: 39)
                 .overlay(Text(message.channel.shortName).font(.caption.bold()))
             VStack(alignment: .leading, spacing: 5) {
@@ -322,8 +467,51 @@ private struct MessageRow: View {
                 }
                 Text(message.text).foregroundStyle(NabColors.text)
             }
+            }
         }
-        .font(.system(size: 16, design: .serif)).padding(.horizontal, 14).padding(.vertical, 11)
+        .buttonStyle(.plain).font(.system(size: 16, design: .serif)).padding(.horizontal, 14).padding(.vertical, 11)
+    }
+}
+
+private struct MessageDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    let message: ChatMessage
+    let isSaved: Bool
+    let onSave: () -> Void
+
+    var body: some View {
+        NavigationView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack {
+                    Circle().fill(message.channel.platform.color.opacity(0.3)).frame(width: 46, height: 46)
+                        .overlay(Text(message.channel.shortName).font(.caption.bold()))
+                    VStack(alignment: .leading) {
+                        Text(message.username).font(.title3.bold()).foregroundStyle(message.channel.platform.color)
+                        Text("\(message.channel.platform.rawValue.capitalized) · \(message.channel.name)")
+                            .font(.caption).foregroundStyle(NabColors.secondary)
+                    }
+                }
+                Text(message.text).font(.system(size: 22, design: .serif)).textSelection(.enabled)
+                HStack {
+                    Text(message.time).font(.caption).foregroundStyle(NabColors.secondary)
+                    Spacer()
+                    Button {
+                        UIPasteboard.general.string = message.text
+                    } label: { Label("Copy", systemImage: "doc.on.doc") }
+                }
+                Button {
+                    onSave()
+                } label: {
+                    Label(isSaved ? "Saved chatter" : "Save chatter", systemImage: isSaved ? "star.fill" : "star")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).tint(message.channel.platform.color).disabled(isSaved)
+                Spacer()
+            }
+            .padding(22).background(NabColors.background.ignoresSafeArea())
+            .navigationTitle("Chat Message").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
     }
 }
 
