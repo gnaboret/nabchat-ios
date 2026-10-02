@@ -1,5 +1,7 @@
-# NabChat iOS shell
+# nabchat for iOS
 
-This SwiftUI entry point links the Kotlin Multiplatform `NabchatShared` framework. The Xcode project is generated from `project.yml` during the GitHub-hosted macOS build so no generated Xcode user data needs to be committed.
+The SwiftUI app links the Kotlin Multiplatform `NabchatShared` framework and is generated from `project.yml` during GitHub-hosted macOS builds. The Android source remains preserved in the same repository.
 
-The current target is an unsigned simulator build. Device and TestFlight builds will be enabled after Apple Developer membership, signing certificates, and an App Store Connect application record are available.
+Implemented iOS features include River, Rooms, Rug, persistent channel management, Kick chat, Twitch device authorization and EventSub chat, experimental public YouTube live chat, local history, saved chatters, analytics, PULSE, emote bursts, CSV export, onboarding, appearance settings, StoreKit 2 nabchat+, a six-enabled-channel free limit, privacy metadata, and iPhone/iPad layouts.
+
+Every push compiles both an unsigned simulator app and a physical-device arm64 target on a GitHub-hosted Mac. The simulator `.app` is retained as a workflow artifact. See `RELEASE.md` for the one-time Apple credentials and GitHub secrets required to upload signed builds to TestFlight entirely from Windows.

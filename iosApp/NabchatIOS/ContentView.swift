@@ -137,10 +137,12 @@ struct ContentView: View {
     @State private var showingAddChannel = false
     @State private var inspectedMessage: ChatMessage?
     @State private var inspectedChannel: Channel?
+    @State private var inspectedChatter: SavedChatter?
     @State private var exportDocument: ExportDocument?
     @State private var burstEmoji: String?
     @State private var burstToken = UUID()
     @State private var isAutoFollowing = true
+    @State private var pendingChatterDeletion: IndexSet?
 
     private var messages: [ChatMessage] {
         liveChat.messages
@@ -227,6 +229,29 @@ struct ContentView: View {
                 channel: channel,
                 messages: liveChat.messages.filter { $0.channel.id == channel.id || ($0.channel.name == channel.name && $0.channel.platform == channel.platform) }
             )
+        }
+        .sheet(item: $inspectedChatter) { chatter in
+            ChatterHistoryView(
+                chatter: chatter,
+                messages: liveChat.messages.filter {
+                    $0.username.caseInsensitiveCompare(chatter.username) == .orderedSame && $0.channel.platform == chatter.platform
+                }
+            )
+        }
+        .confirmationDialog("Delete this saved chatter?", isPresented: Binding(
+            get: { pendingChatterDeletion != nil },
+            set: { if !$0 { pendingChatterDeletion = nil } }
+        ), titleVisibility: .visible) {
+            Button("Delete saved chatter", role: .destructive) {
+                if let offsets = pendingChatterDeletion {
+                    savedChatters.remove(atOffsets: offsets)
+                    persistSavedChatters()
+                }
+                pendingChatterDeletion = nil
+            }
+            Button("Cancel", role: .cancel) { pendingChatterDeletion = nil }
+        } message: {
+            Text("Their saved label and highlight color will be removed. Stored chat history is not deleted.")
         }
         .fullScreenCover(isPresented: Binding(
             get: { !hasCompletedOnboarding },
@@ -507,8 +532,13 @@ struct ContentView: View {
                     ForEach($savedChatters) { $chatter in
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
-                                Circle().fill(chatter.platform.color).frame(width: 10, height: 10)
-                                Text(chatter.username).font(.system(size: 19, weight: .semibold, design: .serif))
+                                Button { inspectedChatter = chatter } label: {
+                                    HStack {
+                                        Circle().fill(chatter.platform.color).frame(width: 10, height: 10)
+                                        Text(chatter.username).font(.system(size: 19, weight: .semibold, design: .serif))
+                                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(NabColors.secondary)
+                                    }
+                                }.buttonStyle(.plain)
                                 Spacer()
                                 Button {
                                     exportChats(for: chatter)
@@ -536,8 +566,7 @@ struct ContentView: View {
                         .listRowBackground(NabColors.surface)
                     }
                     .onDelete {
-                        savedChatters.remove(atOffsets: $0)
-                        persistSavedChatters()
+                        pendingChatterDeletion = $0
                     }
                     Section {
                         Button {
@@ -572,6 +601,8 @@ struct ContentView: View {
                         }
                         HStack {
                             Label("\(unique) chatters", systemImage: "person.2")
+                            Spacer()
+                            Label("\(ChatRate.messagesPerMinute(channelMessages))/min", systemImage: "speedometer")
                             Spacer()
                             Label("\(channelMessages.count) messages", systemImage: "text.bubble")
                         }
@@ -797,26 +828,12 @@ private struct RugCard: View {
     let channel: Channel
     let messages: [ChatMessage]
     let action: () -> Void
-    private var messagesPerMinute: Int {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "H:mm:ss"
-        let calendar = Calendar.current
-        let now = calendar.dateComponents([.hour, .minute, .second], from: Date())
-        let nowSeconds = (now.hour ?? 0) * 3600 + (now.minute ?? 0) * 60 + (now.second ?? 0)
-        return messages.filter { message in
-            guard let date = formatter.date(from: message.time) else { return false }
-            let value = calendar.dateComponents([.hour, .minute, .second], from: date)
-            let messageSeconds = (value.hour ?? 0) * 3600 + (value.minute ?? 0) * 60 + (value.second ?? 0)
-            return (nowSeconds - messageSeconds + 86_400) % 86_400 <= 60
-        }.count
-    }
     var body: some View {
         VStack(spacing: 0) {
             Button(action: action) { HStack {
                 Text(channel.name).font(.system(size: 19, design: .serif)).foregroundStyle(channel.platform.color)
                 Spacer()
-                Text("\(Set(messages.map { $0.username.lowercased() }).count) CHATTERS · \(messagesPerMinute)/MIN")
+                Text("\(Set(messages.map { $0.username.lowercased() }).count) CHATTERS · \(ChatRate.messagesPerMinute(messages))/MIN")
                     .font(.system(size: 10)).foregroundStyle(NabColors.secondary)
                 Text("WATCH NOW").font(.system(size: 10, weight: .bold)).foregroundStyle(channel.platform.color)
             }}.buttonStyle(.plain).padding(13)
@@ -884,6 +901,56 @@ private struct ChannelDetailView: View {
                             }
                         }
                         HStack {
+                            Button { if let first = messages.first { proxy.scrollTo(first.id, anchor: .top) } } label: {
+                                Image(systemName: "arrow.up.to.line").frame(width: 44, height: 38)
+                            }
+                            Button { if let last = messages.last { proxy.scrollTo(last.id, anchor: .bottom) } } label: {
+                                Image(systemName: "arrow.down.to.line").frame(width: 44, height: 38)
+                            }
+                            Spacer()
+                        }
+                        .padding(.horizontal, 12).background(NabColors.surface)
+                    }
+                }
+                .background(NabColors.background.ignoresSafeArea())
+            }
+            .navigationTitle("All Chats")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Back") { dismiss() } } }
+        }
+    }
+}
+
+private struct ChatterHistoryView: View {
+    @Environment(\.dismiss) private var dismiss
+    let chatter: SavedChatter
+    let messages: [ChatMessage]
+
+    var body: some View {
+        NavigationView {
+            ScrollViewReader { proxy in
+                VStack(spacing: 0) {
+                    HStack {
+                        Circle().fill(chatter.platform.color).frame(width: 11, height: 11)
+                        Text(chatter.username).font(.title3.bold()).foregroundStyle(chatter.platform.color)
+                        Spacer()
+                        Text("\(messages.count) CHATS").font(.caption).foregroundStyle(NabColors.secondary)
+                    }
+                    .padding(14)
+                    Divider().overlay(NabColors.line)
+                    if messages.isEmpty {
+                        Spacer()
+                        Text("No saved chats for this chatter yet.").foregroundStyle(NabColors.secondary)
+                        Spacer()
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(messages) { message in
+                                    MessageRow(message: message, action: {}).id(message.id)
+                                }
+                            }
+                        }
+                        HStack(spacing: 8) {
                             Button { if let first = messages.first { proxy.scrollTo(first.id, anchor: .top) } } label: {
                                 Image(systemName: "arrow.up.to.line").frame(width: 44, height: 38)
                             }
@@ -1168,6 +1235,23 @@ private struct OnboardingView: View {
 private struct ExportDocument: Identifiable {
     let id = UUID()
     let url: URL
+}
+
+private enum ChatRate {
+    static func messagesPerMinute(_ messages: [ChatMessage], now: Date = Date()) -> Int {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "H:mm:ss"
+        let calendar = Calendar.current
+        let current = calendar.dateComponents([.hour, .minute, .second], from: now)
+        let currentSeconds = (current.hour ?? 0) * 3600 + (current.minute ?? 0) * 60 + (current.second ?? 0)
+        return messages.filter { message in
+            guard let date = formatter.date(from: message.time) else { return false }
+            let value = calendar.dateComponents([.hour, .minute, .second], from: date)
+            let messageSeconds = (value.hour ?? 0) * 3600 + (value.minute ?? 0) * 60 + (value.second ?? 0)
+            return (currentSeconds - messageSeconds + 86_400) % 86_400 <= 60
+        }.count
+    }
 }
 
 private enum ChatExporter {
