@@ -2,6 +2,10 @@ package com.nabchat.shared.domain
 
 enum class ChatPlatform { KICK, TWITCH, YOUTUBE, RUMBLE }
 
+object SharedCoreInfo {
+    fun status(): String = "Shared Kotlin core ready"
+}
+
 data class ChatChannel(
     val platform: ChatPlatform,
     val platformChannelId: String,

@@ -23,3 +23,18 @@ jobs:
         run: chmod +x gradlew
       - name: Build iOS simulator framework
         run: ./gradlew :shared:linkDebugFrameworkIosSimulatorArm64
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate iOS project
+        working-directory: iosApp
+        run: xcodegen generate
+      - name: Build iOS app for simulator
+        working-directory: iosApp
+        run: >-
+          xcodebuild
+          -project NabchatIOS.xcodeproj
+          -scheme NabchatIOS
+          -sdk iphonesimulator
+          -configuration Debug
+          CODE_SIGNING_ALLOWED=NO
+          build
