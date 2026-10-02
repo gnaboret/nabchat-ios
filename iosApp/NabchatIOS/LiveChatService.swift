@@ -7,12 +7,15 @@ final class LiveChatService: ObservableObject {
 
     private var pollingTask: Task<Void, Never>?
     private var twitchTask: Task<Void, Never>?
+    private var youtubeTask: Task<Void, Never>?
     private var twitchSocket: URLSessionWebSocketTask?
     private var seenMessageIDs = Set<String>()
     private var channelIDs: [UUID: String] = [:]
     private var kickConnected = false
     private var twitchConnected = false
+    private var youtubeConnected = false
     private let twitchClientID = "4uda3hw7k1wm9m0gpw2ot2aksbh0lr"
+    private let youtubeClient = YouTubeChatClient()
 
     init() {
         loadHistory()
@@ -21,6 +24,7 @@ final class LiveChatService: ObservableObject {
     deinit {
         pollingTask?.cancel()
         twitchTask?.cancel()
+        youtubeTask?.cancel()
         twitchSocket?.cancel(with: .goingAway, reason: nil)
     }
 
@@ -36,6 +40,7 @@ final class LiveChatService: ObservableObject {
         }
 
         startTwitch(channels.filter { $0.platform == .twitch }, token: twitchToken, userID: twitchUserID, allChannels: channels)
+        startYouTube(channels.filter { $0.platform == .youtube }, allChannels: channels)
     }
 
     private func startKickPolling(_ kickChannels: [Channel], allChannels: [Channel]) {
@@ -169,7 +174,51 @@ final class LiveChatService: ObservableObject {
     }
 
     private func refreshConnectionState(channels: [Channel]) {
-        isConnected = channels.isEmpty || kickConnected || twitchConnected
+        isConnected = channels.isEmpty || kickConnected || twitchConnected || youtubeConnected
+    }
+
+    private func startYouTube(_ channels: [Channel], allChannels: [Channel]) {
+        youtubeTask?.cancel()
+        guard !channels.isEmpty else {
+            youtubeConnected = false
+            refreshConnectionState(channels: allChannels)
+            return
+        }
+        youtubeTask = Task { [weak self] in
+            guard let self else { return }
+            var sessions: [UUID: YouTubeChatSession] = [:]
+            while !Task.isCancelled {
+                var shortestDelay: TimeInterval = 10
+                var successful = false
+                for channel in channels where !Task.isCancelled {
+                    do {
+                        let videoID = try await youtubeClient.discoverLiveVideoID(channelInput: channel.name)
+                        guard let videoID else {
+                            sessions.removeValue(forKey: channel.id)
+                            continue
+                        }
+                        var session = sessions[channel.id]
+                        if session?.videoID != videoID { session = try await youtubeClient.openSession(videoID: videoID) }
+                        guard var activeSession = session else { continue }
+                        let result = try await youtubeClient.poll(activeSession)
+                        if let continuation = result.continuation { activeSession.continuation = continuation }
+                        sessions[channel.id] = activeSession
+                        let converted = result.messages.map {
+                            ChatMessage(channel: channel, username: $0.username, text: $0.text, time: DateFormatter.chatTime.string(from: $0.date), badge: $0.badge, sourceID: "youtube:\($0.id)")
+                        }
+                        appendNew(converted)
+                        shortestDelay = min(shortestDelay, result.delay)
+                        successful = true
+                    } catch {
+                        sessions.removeValue(forKey: channel.id)
+                    }
+                }
+                youtubeConnected = successful
+                refreshConnectionState(channels: allChannels)
+                let delay = successful ? shortestDelay : 15
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            }
+        }
     }
 
     func clearHistory() {
