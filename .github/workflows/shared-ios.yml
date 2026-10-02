@@ -1,0 +1,23 @@
+name: Shared iOS framework
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-ios-framework:
+    runs-on: macos-26
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Build iOS simulator framework
+        run: ./gradlew :shared:linkDebugFrameworkIosSimulatorArm64
