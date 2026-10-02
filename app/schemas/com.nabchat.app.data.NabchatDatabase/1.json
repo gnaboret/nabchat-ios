@@ -1,0 +1,388 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "1665f37608e1df2272ee373fb58dd511",
+    "entities": [
+      {
+        "tableName": "channels",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`key` TEXT NOT NULL, `platform` TEXT NOT NULL, `platformChannelId` TEXT NOT NULL, `chatroomId` TEXT, `slug` TEXT NOT NULL, `displayName` TEXT NOT NULL, `avatarUrl` TEXT, `enabled` INTEGER NOT NULL, `dateAdded` INTEGER NOT NULL, PRIMARY KEY(`key`))",
+        "fields": [
+          {
+            "fieldPath": "key",
+            "columnName": "key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "platform",
+            "columnName": "platform",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "platformChannelId",
+            "columnName": "platformChannelId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "chatroomId",
+            "columnName": "chatroomId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slug",
+            "columnName": "slug",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "displayName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "avatarUrl",
+            "columnName": "avatarUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dateAdded",
+            "columnName": "dateAdded",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "key"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_channels_platform_slug",
+            "unique": true,
+            "columnNames": [
+              "platform",
+              "slug"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_channels_platform_slug` ON `${TABLE_NAME}` (`platform`, `slug`)"
+          }
+        ]
+      },
+      {
+        "tableName": "messages",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`key` TEXT NOT NULL, `platform` TEXT NOT NULL, `messageId` TEXT NOT NULL, `channelKey` TEXT NOT NULL, `platformUserId` TEXT, `username` TEXT NOT NULL, `displayName` TEXT NOT NULL, `text` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, `receivedAt` INTEGER NOT NULL, `emotesJson` TEXT NOT NULL, `badgesJson` TEXT NOT NULL, `replyJson` TEXT, `isEmoteOnly` INTEGER NOT NULL, `rawMetadata` TEXT, PRIMARY KEY(`key`))",
+        "fields": [
+          {
+            "fieldPath": "key",
+            "columnName": "key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "platform",
+            "columnName": "platform",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "messageId",
+            "columnName": "messageId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "channelKey",
+            "columnName": "channelKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "platformUserId",
+            "columnName": "platformUserId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "username",
+            "columnName": "username",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "displayName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "text",
+            "columnName": "text",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "receivedAt",
+            "columnName": "receivedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "emotesJson",
+            "columnName": "emotesJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "badgesJson",
+            "columnName": "badgesJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "replyJson",
+            "columnName": "replyJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isEmoteOnly",
+            "columnName": "isEmoteOnly",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawMetadata",
+            "columnName": "rawMetadata",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "key"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_messages_timestamp",
+            "unique": false,
+            "columnNames": [
+              "timestamp"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_timestamp` ON `${TABLE_NAME}` (`timestamp`)"
+          },
+          {
+            "name": "index_messages_channelKey",
+            "unique": false,
+            "columnNames": [
+              "channelKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_channelKey` ON `${TABLE_NAME}` (`channelKey`)"
+          },
+          {
+            "name": "index_messages_platformUserId",
+            "unique": false,
+            "columnNames": [
+              "platformUserId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_platformUserId` ON `${TABLE_NAME}` (`platformUserId`)"
+          },
+          {
+            "name": "index_messages_platform",
+            "unique": false,
+            "columnNames": [
+              "platform"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_platform` ON `${TABLE_NAME}` (`platform`)"
+          }
+        ]
+      },
+      {
+        "tableName": "hidden_users",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `platform` TEXT NOT NULL, `platformUserId` TEXT, `username` TEXT NOT NULL, `channelKey` TEXT, `scope` TEXT NOT NULL, `hiddenAt` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "platform",
+            "columnName": "platform",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "platformUserId",
+            "columnName": "platformUserId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "username",
+            "columnName": "username",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "channelKey",
+            "columnName": "channelKey",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "scope",
+            "columnName": "scope",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hiddenAt",
+            "columnName": "hiddenAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_hidden_users_platform",
+            "unique": false,
+            "columnNames": [
+              "platform"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_hidden_users_platform` ON `${TABLE_NAME}` (`platform`)"
+          },
+          {
+            "name": "index_hidden_users_platformUserId",
+            "unique": false,
+            "columnNames": [
+              "platformUserId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_hidden_users_platformUserId` ON `${TABLE_NAME}` (`platformUserId`)"
+          },
+          {
+            "name": "index_hidden_users_username",
+            "unique": false,
+            "columnNames": [
+              "username"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_hidden_users_username` ON `${TABLE_NAME}` (`username`)"
+          }
+        ]
+      },
+      {
+        "tableName": "stream_sessions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`key` TEXT NOT NULL, `platform` TEXT NOT NULL, `channelKey` TEXT NOT NULL, `sessionId` TEXT, `streamStartedAt` INTEGER, `firstObservedAt` INTEGER NOT NULL, `lastObservedAt` INTEGER NOT NULL, PRIMARY KEY(`key`))",
+        "fields": [
+          {
+            "fieldPath": "key",
+            "columnName": "key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "platform",
+            "columnName": "platform",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "channelKey",
+            "columnName": "channelKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionId",
+            "columnName": "sessionId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "streamStartedAt",
+            "columnName": "streamStartedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "firstObservedAt",
+            "columnName": "firstObservedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastObservedAt",
+            "columnName": "lastObservedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "key"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_stream_sessions_platform",
+            "unique": false,
+            "columnNames": [
+              "platform"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_stream_sessions_platform` ON `${TABLE_NAME}` (`platform`)"
+          },
+          {
+            "name": "index_stream_sessions_channelKey",
+            "unique": false,
+            "columnNames": [
+              "channelKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_stream_sessions_channelKey` ON `${TABLE_NAME}` (`channelKey`)"
+          },
+          {
+            "name": "index_stream_sessions_lastObservedAt",
+            "unique": false,
+            "columnNames": [
+              "lastObservedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_stream_sessions_lastObservedAt` ON `${TABLE_NAME}` (`lastObservedAt`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '1665f37608e1df2272ee373fb58dd511')"
+    ]
+  }
+}

@@ -1,0 +1,33 @@
+/.gradle/
+/.gradle-user/
+/.idea/
+/local.properties
+/**/build/
+*.iml
+
+# Android signing and generated release artifacts
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+*.mobileprovision
+keystore.properties
+signing.properties
+release/
+build-apks/
+
+# Existing local Android release-signing container (extensionless)
+/nabchat/
+
+# Local tooling and operating-system files
+.DS_Store
+Thumbs.db
+*.log
+
+# Apple/Xcode user-specific and generated files (for the iOS port)
+DerivedData/
+*.xcuserstate
+xcuserdata/
+Pods/
+.kotlin/

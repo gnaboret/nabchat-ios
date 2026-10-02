@@ -1,0 +1,14 @@
+<resources>
+    <style name="Theme.Nabchat" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/launcher_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/nabchat_wordmark_icon</item>
+        <item name="postSplashScreenTheme">@style/Theme.Nabchat.Main</item>
+    </style>
+
+    <style name="Theme.Nabchat.Main" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">#F7F8F3</item>
+        <item name="android:navigationBarColor">#F7F8F3</item>
+    </style>
+</resources>
