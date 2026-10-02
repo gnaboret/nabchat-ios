@@ -9,6 +9,10 @@ final class LiveChatService: ObservableObject {
     private var seenMessageIDs = Set<String>()
     private var channelIDs: [UUID: String] = [:]
 
+    init() {
+        loadHistory()
+    }
+
     deinit {
         pollingTask?.cancel()
     }
@@ -41,6 +45,12 @@ final class LiveChatService: ObservableObject {
                 try? await Task.sleep(nanoseconds: completedRequest ? 4_000_000_000 : 8_000_000_000)
             }
         }
+    }
+
+    func clearHistory() {
+        messages.removeAll()
+        seenMessageIDs.removeAll()
+        try? FileManager.default.removeItem(at: historyURL)
     }
 
     private func resolveKickID(for channel: Channel) async throws -> String {
@@ -86,6 +96,27 @@ final class LiveChatService: ObservableObject {
         messages.append(contentsOf: fresh)
         if messages.count > 2_000 { messages.removeFirst(messages.count - 2_000) }
         if seenMessageIDs.count > 5_000 { seenMessageIDs = Set(messages.map(\.sourceID)) }
+        saveHistory()
+    }
+
+    private func loadHistory() {
+        guard let data = try? Data(contentsOf: historyURL),
+              let saved = try? JSONDecoder().decode([ChatMessage].self, from: data)
+        else { return }
+        messages = Array(saved.suffix(2_000))
+        seenMessageIDs = Set(messages.map(\.sourceID))
+    }
+
+    private func saveHistory() {
+        guard let data = try? JSONEncoder().encode(messages) else { return }
+        try? FileManager.default.createDirectory(at: historyURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: historyURL, options: .atomic)
+    }
+
+    private var historyURL: URL {
+        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return root.appendingPathComponent("Nabchat", isDirectory: true).appendingPathComponent("chat-history.json")
     }
 
     private func requestObject(_ url: URL) async throws -> [String: Any] {

@@ -48,8 +48,8 @@ struct Channel: Identifiable, Hashable, Codable {
     }
 }
 
-struct ChatMessage: Identifiable {
-    let id = UUID()
+struct ChatMessage: Identifiable, Codable {
+    let id: UUID
     let channel: Channel
     let username: String
     let text: String
@@ -57,7 +57,8 @@ struct ChatMessage: Identifiable {
     let badge: String?
     let sourceID: String
 
-    init(channel: Channel, username: String, text: String, time: String, badge: String?, sourceID: String = UUID().uuidString) {
+    init(id: UUID = UUID(), channel: Channel, username: String, text: String, time: String, badge: String?, sourceID: String = UUID().uuidString) {
+        self.id = id
         self.channel = channel
         self.username = username
         self.text = text
@@ -150,7 +151,7 @@ struct ContentView: View {
             liveChat.update(channels: $0)
         }
         .sheet(isPresented: $showingSettings) {
-            SettingsView(channels: $channels, coreStatus: SharedCoreInfo.shared.status())
+            SettingsView(channels: $channels, liveChat: liveChat, coreStatus: SharedCoreInfo.shared.status())
         }
         .sheet(isPresented: $showingAddChannel) {
             AddChannelView { channel in
@@ -395,7 +396,9 @@ private struct RugCard: View {
 private struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var channels: [Channel]
+    @ObservedObject var liveChat: LiveChatService
     let coreStatus: String
+    @State private var confirmingClear = false
     var body: some View {
         NavigationView {
             Form {
@@ -419,10 +422,25 @@ private struct SettingsView: View {
                     }
                     .onDelete { channels.remove(atOffsets: $0) }
                 }
+                Section("Chat History") {
+                    HStack {
+                        Text("Stored messages")
+                        Spacer()
+                        Text("\(liveChat.messages.count)").foregroundStyle(NabColors.secondary)
+                    }
+                    Button("Delete all stored messages", role: .destructive) { confirmingClear = true }
+                        .disabled(liveChat.messages.isEmpty)
+                }
                 Section("About") { Text(coreStatus); Text("nabchat by Gnaboret") }
             }
             .navigationTitle("Settings")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .confirmationDialog("Delete all saved chat messages?", isPresented: $confirmingClear, titleVisibility: .visible) {
+                Button("Delete all messages", role: .destructive) { liveChat.clearHistory() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This cannot be undone.")
+            }
         }
     }
 }
