@@ -110,6 +110,7 @@ struct ContentView: View {
     @State private var channels = starterChannels
     @State private var savedChatters: [SavedChatter] = []
     @StateObject private var liveChat = LiveChatService()
+    @StateObject private var twitchAuth = TwitchAuthService()
     @State private var mode: ChatMode = .river
     @State private var section: AppSection = .chat
     @State private var selectedChannels: Set<UUID> = []
@@ -166,13 +167,14 @@ struct ContentView: View {
             restoreChannels()
             restoreSavedChatters()
             liveChat.update(channels: channels)
+            twitchAuth.validateSavedAuthorization()
         }
         .onChange(of: channels) {
             persistChannels($0)
             liveChat.update(channels: $0)
         }
         .sheet(isPresented: $showingSettings) {
-            SettingsView(channels: $channels, liveChat: liveChat, coreStatus: SharedCoreInfo.shared.status())
+            SettingsView(channels: $channels, liveChat: liveChat, twitchAuth: twitchAuth, coreStatus: SharedCoreInfo.shared.status())
         }
         .sheet(isPresented: $showingAddChannel) {
             AddChannelView { channel in
@@ -583,8 +585,10 @@ private struct RugCard: View {
 
 private struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @Binding var channels: [Channel]
     @ObservedObject var liveChat: LiveChatService
+    @ObservedObject var twitchAuth: TwitchAuthService
     let coreStatus: String
     @State private var confirmingClear = false
     var body: some View {
@@ -592,7 +596,7 @@ private struct SettingsView: View {
             Form {
                 Section("Platforms") {
                     Label("Kick", systemImage: "checkmark.circle.fill").foregroundStyle(NabColors.green)
-                    Label("Twitch", systemImage: "circle").foregroundStyle(NabColors.purple)
+                    twitchConnectionRow
                     Label("YouTube", systemImage: "circle").foregroundStyle(NabColors.youtube)
                 }
                 Section("Channels") {
@@ -628,6 +632,40 @@ private struct SettingsView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This cannot be undone.")
+            }
+        }
+    }
+
+    @ViewBuilder private var twitchConnectionRow: some View {
+        switch twitchAuth.state {
+        case .disconnected:
+            Button { twitchAuth.connect() } label: {
+                HStack { Label("Twitch", systemImage: "link"); Spacer(); Text("CONNECT") }
+            }.foregroundStyle(NabColors.purple)
+        case .requestingCode:
+            HStack { Label("Twitch", systemImage: "clock"); Spacer(); ProgressView() }.foregroundStyle(NabColors.purple)
+        case .awaitingApproval(let code, let url):
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Twitch activation", systemImage: "link").foregroundStyle(NabColors.purple)
+                Text(code).font(.title2.monospaced().bold()).textSelection(.enabled)
+                HStack {
+                    Button("Copy code") { UIPasteboard.general.string = code }
+                    Spacer()
+                    Button("Open Twitch activation") { openURL(url) }
+                }.font(.caption)
+            }
+        case .connected(let login):
+            HStack {
+                Label("Twitch", systemImage: "checkmark.circle.fill").foregroundStyle(NabColors.purple)
+                Spacer()
+                Text("@\(login)").font(.caption)
+                Button("Disconnect", role: .destructive) { twitchAuth.disconnect() }.font(.caption)
+            }
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Twitch authorization required", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                Text(message).font(.caption).foregroundStyle(NabColors.secondary)
+                Button("Connect again") { twitchAuth.connect() }.foregroundStyle(NabColors.purple)
             }
         }
     }
