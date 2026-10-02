@@ -742,7 +742,19 @@ private struct SettingsView: View {
                     Button("Delete all stored messages", role: .destructive) { confirmingClear = true }
                         .disabled(liveChat.messages.isEmpty)
                 }
-                Section("About") { Text(coreStatus); Text("nabchat by Gnaboret") }
+                Section("About") {
+                    Text(coreStatus)
+                    Link("Privacy Policy", destination: URL(string: "https://sites.google.com/view/nabchatprivacypolicy/home")!)
+                    Link("Support & nabchat website", destination: URL(string: "https://gnaboret.ca/nabchat")!)
+                    HStack {
+                        Text("Version")
+                        Spacer()
+                        Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Development")
+                            .foregroundStyle(NabColors.secondary)
+                    }
+                    Text("nabchat by Gnaboret · the g and t are silent")
+                        .font(.caption).foregroundStyle(NabColors.secondary)
+                }
             }
             .navigationTitle("Settings")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
