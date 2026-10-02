@@ -36,8 +36,33 @@ jobs:
           -scheme NabchatIOS
           -sdk iphonesimulator
           -destination "generic/platform=iOS Simulator"
+          -derivedDataPath build/simulator
           -configuration Debug
           ARCHS=arm64
           ONLY_ACTIVE_ARCH=YES
           CODE_SIGNING_ALLOWED=NO
           build
+      - name: Build physical-device framework
+        run: ./gradlew :shared:linkReleaseFrameworkIosArm64
+      - name: Select physical-device framework
+        run: |
+          rm -rf shared/build/bin/iosSimulatorArm64/debugFramework/NabchatShared.framework
+          cp -R shared/build/bin/iosArm64/releaseFramework/NabchatShared.framework shared/build/bin/iosSimulatorArm64/debugFramework/NabchatShared.framework
+      - name: Compile iOS app for physical devices
+        working-directory: iosApp
+        run: >-
+          xcodebuild
+          -project NabchatIOS.xcodeproj
+          -scheme NabchatIOS
+          -sdk iphoneos
+          -destination "generic/platform=iOS"
+          -derivedDataPath build/device
+          -configuration Release
+          ARCHS=arm64
+          CODE_SIGNING_ALLOWED=NO
+          build
+      - name: Upload unsigned simulator build
+        uses: actions/upload-artifact@v4
+        with:
+          name: nabchat-ios-simulator
+          path: iosApp/build/simulator/Build/Products/Debug-iphonesimulator/nabchat.app

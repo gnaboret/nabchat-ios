@@ -107,6 +107,8 @@ struct ContentView: View {
 
     @AppStorage("savedChannels") private var savedChannels = ""
     @AppStorage("savedChatters") private var savedChattersData = ""
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @AppStorage("keepScreenAwake") private var keepScreenAwake = false
     @State private var channels = starterChannels
     @State private var savedChatters: [SavedChatter] = []
     @StateObject private var liveChat = LiveChatService()
@@ -163,7 +165,9 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .onChange(of: keepScreenAwake) { UIApplication.shared.isIdleTimerDisabled = $0 }
         .onAppear {
+            UIApplication.shared.isIdleTimerDisabled = keepScreenAwake
             restoreChannels()
             restoreSavedChatters()
             twitchAuth.validateSavedAuthorization()
@@ -187,6 +191,12 @@ struct ContentView: View {
             MessageDetailView(message: message, isSaved: savedChatters.contains { $0.username.caseInsensitiveCompare(message.username) == .orderedSame && $0.platform == message.channel.platform }) {
                 saveChatter(from: message)
             }
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { !hasCompletedOnboarding },
+            set: { if !$0 { hasCompletedOnboarding = true } }
+        )) {
+            OnboardingView { hasCompletedOnboarding = true }
         }
     }
 
@@ -460,17 +470,23 @@ struct ContentView: View {
 private struct MessageRow: View {
     let message: ChatMessage
     let action: () -> Void
+    @AppStorage("showTimestamps") private var showTimestamps = true
+    @AppStorage("showProfilePictures") private var showProfilePictures = true
     var body: some View {
         Button(action: action) {
             HStack(alignment: .top, spacing: 10) {
-            Circle().fill(message.channel.platform.color.opacity(0.28)).frame(width: 39, height: 39)
-                .overlay(Text(message.channel.shortName).font(.caption.bold()))
+            if showProfilePictures {
+                Circle().fill(message.channel.platform.color.opacity(0.28)).frame(width: 39, height: 39)
+                    .overlay(Text(message.channel.shortName).font(.caption.bold()))
+            }
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Text(message.username).foregroundStyle(message.channel.platform.color)
                     if let badge = message.badge { Text(badge).font(.system(size: 9)).foregroundStyle(NabColors.secondary) }
                     Spacer()
-                    Text(message.time).font(.system(size: 10)).foregroundStyle(message.channel.platform.color.opacity(0.72))
+                    if showTimestamps {
+                        Text(message.time).font(.system(size: 10)).foregroundStyle(message.channel.platform.color.opacity(0.72))
+                    }
                 }
                 Text(message.text).foregroundStyle(NabColors.text)
             }
@@ -596,6 +612,14 @@ private struct SettingsView: View {
     @ObservedObject var twitchAuth: TwitchAuthService
     let coreStatus: String
     @State private var confirmingClear = false
+    @AppStorage("keepScreenAwake") private var keepScreenAwake = false
+    @AppStorage("showTimestamps") private var showTimestamps = true
+    @AppStorage("showProfilePictures") private var showProfilePictures = true
+    @AppStorage("startWithAutoScroll") private var startWithAutoScroll = true
+    @AppStorage("showLikelySpam") private var showLikelySpam = false
+    @AppStorage("emoteBurstEnabled") private var emoteBurstEnabled = true
+    @AppStorage("emoteBurstSize") private var emoteBurstSize = 300.0
+    @AppStorage("pulseBarSize") private var pulseBarSize = 1.0
     var body: some View {
         NavigationView {
             Form {
@@ -618,6 +642,24 @@ private struct SettingsView: View {
                         }
                     }
                     .onDelete { channels.remove(atOffsets: $0) }
+                }
+                Section("Message Arrival") {
+                    Toggle("Start with auto-scroll", isOn: $startWithAutoScroll)
+                    Toggle("Keep screen on", isOn: $keepScreenAwake)
+                    Toggle("Show likely spam messages", isOn: $showLikelySpam)
+                }
+                Section("Appearance") {
+                    Toggle("Show timestamps", isOn: $showTimestamps)
+                    Toggle("Show profile pictures", isOn: $showProfilePictures)
+                    Toggle("Emote bursts", isOn: $emoteBurstEnabled)
+                    VStack(alignment: .leading) {
+                        Text("Burst size · \(Int(emoteBurstSize))%")
+                        Slider(value: $emoteBurstSize, in: 100...1000, step: 50)
+                    }
+                    VStack(alignment: .leading) {
+                        Text("PULSE size · \(Int(pulseBarSize * 100))%")
+                        Slider(value: $pulseBarSize, in: 0.5...2.0, step: 0.1)
+                    }
                 }
                 Section("Chat History") {
                     HStack {
@@ -710,6 +752,51 @@ private struct AddChannelView: View {
             .font(.caption.bold()).frame(maxWidth: .infinity, minHeight: 42).foregroundStyle(platform.color)
             .background(selectedPlatform == platform ? platform.color.opacity(0.2) : Color.clear)
             .overlay(Capsule().stroke(platform.color, lineWidth: selectedPlatform == platform ? 2 : 1)).clipShape(Capsule())
+    }
+}
+
+private struct OnboardingView: View {
+    let complete: () -> Void
+    @State private var page = 0
+
+    private let pages = [
+        ("Welcome to nabchat", "Bring multiple livestream conversations together in one lightweight viewer.", "text.bubble.fill"),
+        ("Add your channels", "Tap the plus button, choose Kick, Twitch, or YouTube, then enter the channel name.", "plus.circle.fill"),
+        ("Choose your view", "RIVER combines everything. ROOMS separates channels. RUG follows activity at a glance.", "rectangle.3.group.fill"),
+        ("Make it yours", "Save chatters, compare channel activity, and tune the experience in Settings.", "slider.horizontal.3")
+    ]
+
+    var body: some View {
+        ZStack {
+            NabColors.background.ignoresSafeArea()
+            VStack(spacing: 28) {
+                HStack {
+                    Spacer()
+                    Button("Skip", action: complete).foregroundStyle(NabColors.secondary)
+                }
+                Spacer()
+                Image(systemName: pages[page].2)
+                    .font(.system(size: 62)).foregroundStyle(page == 2 ? NabColors.purple : NabColors.green)
+                Text(pages[page].0)
+                    .font(.system(size: 34, weight: .bold, design: .serif)).foregroundStyle(NabColors.text)
+                Text(pages[page].1)
+                    .font(.body).multilineTextAlignment(.center).foregroundStyle(NabColors.secondary)
+                    .padding(.horizontal, 18)
+                HStack(spacing: 8) {
+                    ForEach(pages.indices, id: \.self) { index in
+                        Capsule().fill(index == page ? NabColors.green : NabColors.line)
+                            .frame(width: index == page ? 26 : 8, height: 8)
+                    }
+                }
+                Spacer()
+                Button(page == pages.count - 1 ? "START CHATTING" : "NEXT") {
+                    if page == pages.count - 1 { complete() } else { withAnimation { page += 1 } }
+                }
+                .font(.headline).frame(maxWidth: .infinity).frame(height: 52)
+                .background(NabColors.green, in: Capsule()).foregroundStyle(Color.black)
+            }
+            .padding(24)
+        }
     }
 }
 
