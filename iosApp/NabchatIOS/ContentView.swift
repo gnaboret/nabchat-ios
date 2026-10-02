@@ -125,6 +125,10 @@ struct ContentView: View {
     @AppStorage("savedChatters") private var savedChattersData = ""
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("keepScreenAwake") private var keepScreenAwake = false
+    @AppStorage("emoteBurstEnabled") private var emoteBurstEnabled = true
+    @AppStorage("emoteBurstSize") private var emoteBurstSize = 300.0
+    @AppStorage("emoteBurstOpacity") private var emoteBurstOpacity = 0.65
+    @AppStorage("pulseBarSize") private var pulseBarSize = 1.0
     @State private var channels = starterChannels
     @State private var savedChatters: [SavedChatter] = []
     @StateObject private var liveChat = LiveChatService()
@@ -138,6 +142,8 @@ struct ContentView: View {
     @State private var inspectedMessage: ChatMessage?
     @State private var inspectedChannel: Channel?
     @State private var exportDocument: ExportDocument?
+    @State private var burstEmoji: String?
+    @State private var burstToken = UUID()
 
     private var messages: [ChatMessage] {
         if !liveChat.messages.isEmpty { return liveChat.messages }
@@ -181,6 +187,19 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay {
+                    if let burstEmoji {
+                        EmojiBurstView(
+                            emoji: burstEmoji,
+                            token: burstToken,
+                            scale: emoteBurstSize / 100,
+                            opacity: emoteBurstOpacity
+                        )
+                        .id(burstToken)
+                        .allowsHitTesting(false)
+                    }
+                }
+                pulseBar
                 channelStrip
                 bottomNavigation
             }
@@ -199,6 +218,7 @@ struct ContentView: View {
             refreshProviders()
         }
         .onChange(of: twitchAuth.state) { _ in refreshProviders() }
+        .onChange(of: liveChat.messages.count) { _ in triggerEmojiBurst() }
         .onChange(of: store.isPlus) { isPlus in
             if !isPlus { enforceFreeChannelLimit() }
             refreshProviders()
@@ -278,6 +298,53 @@ struct ContentView: View {
         for index in channels.indices where channels[index].isEnabled {
             enabledCount += 1
             if enabledCount > 6 { channels[index].isEnabled = false }
+        }
+    }
+
+    private var pulseItems: [(emoji: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for message in visibleMessages.suffix(500) {
+            for scalar in message.text.unicodeScalars where scalar.properties.isEmojiPresentation {
+                counts[String(scalar), default: 0] += 1
+            }
+        }
+        return counts.map { ($0.key, $0.value) }
+            .sorted { $0.count == $1.count ? $0.emoji < $1.emoji : $0.count > $1.count }
+            .prefix(7).map { $0 }
+    }
+
+    @ViewBuilder private var pulseBar: some View {
+        if !pulseItems.isEmpty {
+            HStack(spacing: 8) {
+                Text("PULSE")
+                    .font(.system(size: 11 * pulseBarSize, weight: .bold, design: .serif))
+                    .foregroundStyle(NabColors.green)
+                ForEach(Array(pulseItems.enumerated()), id: \.offset) { _, item in
+                    HStack(spacing: 4) {
+                        Text(item.emoji).font(.system(size: 18 * pulseBarSize))
+                        Text("\(item.count)").font(.system(size: 10 * pulseBarSize)).foregroundStyle(NabColors.secondary)
+                    }
+                    .padding(.horizontal, 8).frame(height: 34 * pulseBarSize)
+                    .background(NabColors.raised, in: Capsule())
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 5)
+            .frame(maxWidth: .infinity).background(NabColors.background)
+            .overlay(alignment: .top) { Divider().overlay(NabColors.line) }
+        }
+    }
+
+    private func triggerEmojiBurst() {
+        guard emoteBurstEnabled,
+              let message = liveChat.messages.last,
+              selectedChannels.isEmpty || selectedChannels.contains(message.channel.id),
+              let emoji = message.text.unicodeScalars.first(where: { $0.properties.isEmojiPresentation }) else { return }
+        burstEmoji = String(emoji)
+        burstToken = UUID()
+        let token = burstToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.15) {
+            if burstToken == token { burstEmoji = nil }
         }
     }
 
@@ -573,6 +640,37 @@ private struct MessageRow: View {
     }
 }
 
+private struct EmojiBurstView: View {
+    let emoji: String
+    let token: UUID
+    let scale: Double
+    let opacity: Double
+    @State private var visible = false
+
+    var body: some View {
+        GeometryReader { geometry in
+            let seed = abs(token.uuidString.hashValue)
+            let directionX: CGFloat = seed.isMultiple(of: 2) ? 1 : -1
+            let directionY: CGFloat = seed.isMultiple(of: 3) ? 1 : -1
+            let fontSize = 30 * scale
+            let safeX = max(0, geometry.size.width / 2 - min(110, fontSize * 0.32))
+            let safeY = max(0, geometry.size.height / 2 - min(140, fontSize * 0.36))
+            Text(emoji)
+                .font(.system(size: fontSize))
+                .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+                .offset(x: directionX * min(safeX, geometry.size.width * 0.18), y: directionY * min(safeY, geometry.size.height * 0.16))
+                .scaleEffect(visible ? 1 : 0.22)
+                .opacity(visible ? opacity : 0)
+                .onAppear {
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.72)) { visible = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.72) {
+                        withAnimation(.easeOut(duration: 0.38)) { visible = false }
+                    }
+                }
+        }
+    }
+}
+
 private struct MessageDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let message: ChatMessage
@@ -787,6 +885,7 @@ private struct SettingsView: View {
     @AppStorage("showLikelySpam") private var showLikelySpam = false
     @AppStorage("emoteBurstEnabled") private var emoteBurstEnabled = true
     @AppStorage("emoteBurstSize") private var emoteBurstSize = 300.0
+    @AppStorage("emoteBurstOpacity") private var emoteBurstOpacity = 0.65
     @AppStorage("pulseBarSize") private var pulseBarSize = 1.0
     var body: some View {
         NavigationView {
@@ -861,6 +960,10 @@ private struct SettingsView: View {
                     VStack(alignment: .leading) {
                         Text("Burst size · \(Int(emoteBurstSize))%")
                         Slider(value: $emoteBurstSize, in: 100...1000, step: 50)
+                    }
+                    VStack(alignment: .leading) {
+                        Text("Burst transparency · \(Int((1 - emoteBurstOpacity) * 100))%")
+                        Slider(value: $emoteBurstOpacity, in: 0.1...1.0, step: 0.05)
                     }
                     VStack(alignment: .leading) {
                         Text("PULSE size · \(Int(pulseBarSize * 100))%")
