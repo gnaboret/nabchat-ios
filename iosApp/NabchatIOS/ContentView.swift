@@ -23,7 +23,7 @@ private enum AppSection: String {
     }
 }
 
-private enum Platform {
+private enum Platform: String, Codable, CaseIterable {
     case kick, twitch, youtube
     var color: Color {
         switch self {
@@ -34,11 +34,18 @@ private enum Platform {
     }
 }
 
-private struct Channel: Identifiable, Hashable {
-    let id = UUID()
+private struct Channel: Identifiable, Hashable, Codable {
+    let id: UUID
     let name: String
     let shortName: String
     let platform: Platform
+
+    init(id: UUID = UUID(), name: String, shortName: String, platform: Platform) {
+        self.id = id
+        self.name = name
+        self.shortName = shortName
+        self.platform = platform
+    }
 }
 
 private struct ChatMessage: Identifiable {
@@ -63,13 +70,15 @@ private enum NabColors {
 }
 
 struct ContentView: View {
-    private let channels = [
+    private static let starterChannels = [
         Channel(name: "ChickenAndy", shortName: "CA", platform: .kick),
         Channel(name: "BinxBasilisk", shortName: "BB", platform: .twitch),
         Channel(name: "KrispyW", shortName: "KW", platform: .youtube),
         Channel(name: "Ice Poseidon", shortName: "IP", platform: .kick)
     ]
 
+    @AppStorage("savedChannels") private var savedChannels = ""
+    @State private var channels = starterChannels
     @State private var mode: ChatMode = .river
     @State private var section: AppSection = .chat
     @State private var selectedChannels: Set<UUID> = []
@@ -77,13 +86,23 @@ struct ContentView: View {
     @State private var showingAddChannel = false
 
     private var messages: [ChatMessage] {
-        [
-            ChatMessage(channel: channels[0], username: "cardlo", text: "CJ is a man with character", time: "1:25:04", badge: "SUB ×3"),
-            ChatMessage(channel: channels[1], username: "hoodneighbour", text: "this layout is looking clean", time: "1:25:08", badge: nil),
-            ChatMessage(channel: channels[2], username: "PinkyDaP", text: "the whole conversation in one place", time: "1:25:12", badge: "VIP"),
-            ChatMessage(channel: channels[3], username: "wraxter", text: "might be the best thing ever filmed", time: "1:25:16", badge: nil),
-            ChatMessage(channel: channels[0], username: "2moreweeks", text: "we are officially building on iOS", time: "1:25:21", badge: "OG")
+        let examples: [(String, String, String?)] = [
+            ("cardlo", "CJ is a man with character", "SUB ×3"),
+            ("hoodneighbour", "this layout is looking clean", nil),
+            ("PinkyDaP", "the whole conversation in one place", "VIP"),
+            ("wraxter", "might be the best thing ever filmed", nil),
+            ("2moreweeks", "we are officially building on iOS", "OG")
         ]
+        guard !channels.isEmpty else { return [] }
+        return examples.enumerated().map { index, example in
+            ChatMessage(
+                channel: channels[index % channels.count],
+                username: example.0,
+                text: example.1,
+                time: "1:25:\(String(format: "%02d", 4 + index * 4))",
+                badge: example.2
+            )
+        }
     }
 
     private var visibleMessages: [ChatMessage] {
@@ -110,8 +129,32 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .sheet(isPresented: $showingSettings) { SettingsView(coreStatus: SharedCoreInfo.shared.status()) }
-        .sheet(isPresented: $showingAddChannel) { AddChannelView() }
+        .onAppear(perform: restoreChannels)
+        .onChange(of: channels) { persistChannels($0) }
+        .sheet(isPresented: $showingSettings) {
+            SettingsView(channels: $channels, coreStatus: SharedCoreInfo.shared.status())
+        }
+        .sheet(isPresented: $showingAddChannel) {
+            AddChannelView { channel in
+                channels.append(channel)
+                selectedChannels = [channel.id]
+            }
+        }
+    }
+
+    private func restoreChannels() {
+        guard !savedChannels.isEmpty,
+              let data = savedChannels.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([Channel].self, from: data)
+        else { return }
+        channels = decoded
+    }
+
+    private func persistChannels(_ value: [Channel]) {
+        guard let data = try? JSONEncoder().encode(value),
+              let encoded = String(data: data, encoding: .utf8)
+        else { return }
+        savedChannels = encoded
     }
 
     private var header: some View {
@@ -332,6 +375,7 @@ private struct RugCard: View {
 
 private struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Binding var channels: [Channel]
     let coreStatus: String
     var body: some View {
         NavigationView {
@@ -340,6 +384,21 @@ private struct SettingsView: View {
                     Label("Kick", systemImage: "checkmark.circle.fill").foregroundStyle(NabColors.green)
                     Label("Twitch", systemImage: "circle").foregroundStyle(NabColors.purple)
                     Label("YouTube", systemImage: "circle").foregroundStyle(NabColors.youtube)
+                }
+                Section("Channels") {
+                    if channels.isEmpty {
+                        Text("No channels added").foregroundStyle(NabColors.secondary)
+                    }
+                    ForEach(channels) { channel in
+                        HStack {
+                            Circle().fill(channel.platform.color).frame(width: 9, height: 9)
+                            Text(channel.name)
+                            Spacer()
+                            Text(channel.platform.rawValue.uppercased())
+                                .font(.caption2).foregroundStyle(channel.platform.color)
+                        }
+                    }
+                    .onDelete { channels.remove(atOffsets: $0) }
                 }
                 Section("About") { Text(coreStatus); Text("nabchat by Gnaboret") }
             }
@@ -351,6 +410,7 @@ private struct SettingsView: View {
 
 private struct AddChannelView: View {
     @Environment(\.dismiss) private var dismiss
+    let onAdd: (Channel) -> Void
     @State private var selectedPlatform: Platform?
     @State private var channelName = ""
     var body: some View {
@@ -361,7 +421,13 @@ private struct AddChannelView: View {
                     platformButton("KICK", .kick); platformButton("TWITCH", .twitch); platformButton("YOUTUBE", .youtube)
                 }
                 TextField("Username/channel", text: $channelName).textFieldStyle(.roundedBorder).disabled(selectedPlatform == nil)
-                Button("ADD CHANNEL") { dismiss() }
+                Button("ADD CHANNEL") {
+                    guard let platform = selectedPlatform else { return }
+                    let cleaned = channelName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let initials = cleaned.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
+                    onAdd(Channel(name: cleaned, shortName: initials.isEmpty ? "?" : initials, platform: platform))
+                    dismiss()
+                }
                     .buttonStyle(.borderedProminent).tint(selectedPlatform?.color ?? NabColors.secondary)
                     .disabled(selectedPlatform == nil || channelName.trimmingCharacters(in: .whitespaces).isEmpty)
                 Spacer()
