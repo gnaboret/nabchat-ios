@@ -40,12 +40,28 @@ struct Channel: Identifiable, Hashable, Codable {
     let name: String
     let shortName: String
     let platform: Platform
+    var isEnabled: Bool
+    var isFavorite: Bool
 
-    init(id: UUID = UUID(), name: String, shortName: String, platform: Platform) {
+    init(id: UUID = UUID(), name: String, shortName: String, platform: Platform, isEnabled: Bool = true, isFavorite: Bool = false) {
         self.id = id
         self.name = name
         self.shortName = shortName
         self.platform = platform
+        self.isEnabled = isEnabled
+        self.isFavorite = isFavorite
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name, shortName, platform, isEnabled, isFavorite }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        shortName = try values.decode(String.self, forKey: .shortName)
+        platform = try values.decode(Platform.self, forKey: .platform)
+        isEnabled = try values.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        isFavorite = try values.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
     }
 }
 
@@ -113,6 +129,7 @@ struct ContentView: View {
     @State private var savedChatters: [SavedChatter] = []
     @StateObject private var liveChat = LiveChatService()
     @StateObject private var twitchAuth = TwitchAuthService()
+    @StateObject private var store = StoreManager()
     @State private var mode: ChatMode = .river
     @State private var section: AppSection = .chat
     @State private var selectedChannels: Set<UUID> = []
@@ -144,6 +161,8 @@ struct ContentView: View {
     private var visibleMessages: [ChatMessage] {
         selectedChannels.isEmpty ? messages : messages.filter { selectedChannels.contains($0.channel.id) }
     }
+
+    private var enabledChannels: [Channel] { channels.filter(\.isEnabled) }
 
     var body: some View {
         ZStack {
@@ -178,12 +197,18 @@ struct ContentView: View {
             refreshProviders()
         }
         .onChange(of: twitchAuth.state) { _ in refreshProviders() }
+        .onChange(of: store.isPlus) { isPlus in
+            if !isPlus { enforceFreeChannelLimit() }
+            refreshProviders()
+        }
         .sheet(isPresented: $showingSettings) {
-            SettingsView(channels: $channels, liveChat: liveChat, twitchAuth: twitchAuth, coreStatus: SharedCoreInfo.shared.status())
+            SettingsView(channels: $channels, liveChat: liveChat, twitchAuth: twitchAuth, store: store, coreStatus: SharedCoreInfo.shared.status())
         }
         .sheet(isPresented: $showingAddChannel) {
             AddChannelView { channel in
-                channels.append(channel)
+                var newChannel = channel
+                newChannel.isEnabled = store.isPlus || channels.filter(\.isEnabled).count < 6
+                channels.append(newChannel)
                 selectedChannels = [channel.id]
             }
         }
@@ -234,7 +259,15 @@ struct ContentView: View {
     }
 
     private func refreshProviders() {
-        liveChat.update(channels: channels, twitchToken: twitchAuth.accessToken, twitchUserID: twitchAuth.userID)
+        liveChat.update(channels: enabledChannels, twitchToken: twitchAuth.accessToken, twitchUserID: twitchAuth.userID)
+    }
+
+    private func enforceFreeChannelLimit() {
+        var enabledCount = 0
+        for index in channels.indices where channels[index].isEnabled {
+            enabledCount += 1
+            if enabledCount > 6 { channels[index].isEnabled = false }
+        }
     }
 
     private var header: some View {
@@ -309,14 +342,14 @@ struct ContentView: View {
         case .rooms:
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    ForEach(channels) { channel in
+                    ForEach(enabledChannels) { channel in
                         RoomCard(channel: channel, messages: messages.filter { $0.channel == channel })
                     }
                 }.padding(14)
             }
         case .rug:
             ScrollView {
-                LazyVStack(spacing: 12) { ForEach(channels) { RugCard(channel: $0) } }
+                LazyVStack(spacing: 12) { ForEach(enabledChannels) { RugCard(channel: $0) } }
                     .padding(14)
             }
         }
@@ -328,7 +361,7 @@ struct ContentView: View {
                 ChannelPill(title: "ALL", initials: nil, color: NabColors.raised, selected: selectedChannels.isEmpty) {
                     selectedChannels.removeAll()
                 }
-                ForEach(channels) { channel in
+                ForEach(enabledChannels) { channel in
                     ChannelPill(title: channel.name, initials: channel.shortName, color: channel.platform.color, selected: selectedChannels.contains(channel.id)) {
                         if selectedChannels.contains(channel.id) { selectedChannels.remove(channel.id) }
                         else { selectedChannels.insert(channel.id) }
@@ -394,7 +427,7 @@ struct ContentView: View {
                     metricCard("MESSAGES", value: "\(liveChat.messages.count)", icon: "text.bubble")
                     metricCard("CHATTERS", value: "\(Set(liveChat.messages.map { $0.username.lowercased() }).count)", icon: "person.2")
                 }
-                ForEach(channels) { channel in
+                ForEach(enabledChannels) { channel in
                     let channelMessages = liveChat.messages.filter { $0.channel.id == channel.id || ($0.channel.name == channel.name && $0.channel.platform == channel.platform) }
                     let unique = Set(channelMessages.map { $0.username.lowercased() }).count
                     VStack(alignment: .leading, spacing: 10) {
@@ -433,7 +466,7 @@ struct ContentView: View {
     }
 
     private func activityFraction(_ count: Int) -> CGFloat {
-        let maximum = max(1, channels.map { channel in
+        let maximum = max(1, enabledChannels.map { channel in
             liveChat.messages.filter { $0.channel.name == channel.name && $0.channel.platform == channel.platform }.count
         }.max() ?? 1)
         return CGFloat(count) / CGFloat(maximum)
@@ -610,6 +643,7 @@ private struct SettingsView: View {
     @Binding var channels: [Channel]
     @ObservedObject var liveChat: LiveChatService
     @ObservedObject var twitchAuth: TwitchAuthService
+    @ObservedObject var store: StoreManager
     let coreStatus: String
     @State private var confirmingClear = false
     @AppStorage("keepScreenAwake") private var keepScreenAwake = false
@@ -632,16 +666,54 @@ private struct SettingsView: View {
                     if channels.isEmpty {
                         Text("No channels added").foregroundStyle(NabColors.secondary)
                     }
-                    ForEach(channels) { channel in
+                    ForEach($channels) { $channel in
                         HStack {
                             Circle().fill(channel.platform.color).frame(width: 9, height: 9)
                             Text(channel.name)
                             Spacer()
+                            Button {
+                                channel.isFavorite.toggle()
+                            } label: {
+                                Image(systemName: channel.isFavorite ? "star.fill" : "star")
+                                    .foregroundStyle(channel.isFavorite ? Color.yellow : NabColors.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            Toggle("", isOn: Binding(
+                                get: { channel.isEnabled },
+                                set: { requested in setEnabled(requested, channelID: channel.id) }
+                            ))
+                            .labelsHidden()
                             Text(channel.platform.rawValue.uppercased())
                                 .font(.caption2).foregroundStyle(channel.platform.color)
                         }
                     }
                     .onDelete { channels.remove(atOffsets: $0) }
+                    if !store.isPlus {
+                        Text("Free mode supports up to six enabled channels. Favorites remain saved even when disabled.")
+                            .font(.caption).foregroundStyle(NabColors.secondary)
+                    }
+                }
+                Section("nabchat+") {
+                    if store.isPlus {
+                        Label("nabchat+ active", systemImage: "checkmark.seal.fill").foregroundStyle(NabColors.green)
+                        Text("Ads are removed and enabled channels are unlimited.")
+                            .font(.caption).foregroundStyle(NabColors.secondary)
+                    } else {
+                        Button {
+                            Task { await store.purchase() }
+                        } label: {
+                            HStack {
+                                Label("Upgrade to nabchat+", systemImage: "plus.circle.fill")
+                                Spacer()
+                                if store.isLoading { ProgressView() }
+                                else if let product = store.product { Text(product.displayPrice) }
+                            }
+                        }
+                        Button("Restore purchase") { Task { await store.restore() } }
+                    }
+                    if let message = store.message {
+                        Text(message).font(.caption).foregroundStyle(NabColors.secondary)
+                    }
                 }
                 Section("Message Arrival") {
                     Toggle("Start with auto-scroll", isOn: $startWithAutoScroll)
@@ -681,6 +753,15 @@ private struct SettingsView: View {
                 Text("This cannot be undone.")
             }
         }
+    }
+
+    private func setEnabled(_ requested: Bool, channelID: UUID) {
+        guard let index = channels.firstIndex(where: { $0.id == channelID }) else { return }
+        if requested && !store.isPlus && channels.filter(\.isEnabled).count >= 6 {
+            store.message = "Free mode can enable six channels. Upgrade to nabchat+ for unlimited channels."
+            return
+        }
+        channels[index].isEnabled = requested
     }
 
     @ViewBuilder private var twitchConnectionRow: some View {
