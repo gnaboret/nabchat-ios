@@ -36,9 +36,8 @@ final class YouTubeChatClient {
     }
 
     func openSession(videoID: String) async throws -> YouTubeChatSession {
-        async let watch = getText("https://www.youtube.com/watch?v=\(videoID)")
-        async let chat = getText("https://www.youtube.com/live_chat?v=\(videoID)&is_popout=1")
-        let (watchPage, chatPage) = try await (watch, chat)
+        let watchPage = try await getText("https://www.youtube.com/watch?v=\(videoID)")
+        let chatPage = try await getText("https://www.youtube.com/live_chat?v=\(videoID)&is_popout=1")
         let combined = chatPage + watchPage
         guard let key = firstMatch(#""INNERTUBE_API_KEY":"([^"]+)""#, in: combined) else { throw YouTubeError.noAPIKey }
         let version = firstMatch(#""INNERTUBE_CLIENT_VERSION":"([^"]+)""#, in: combined) ?? "2.20260901.00.00"
