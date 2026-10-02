@@ -114,17 +114,13 @@ enum NabColors {
 }
 
 struct ContentView: View {
-    private static let starterChannels = [
-        Channel(name: "ChickenAndy", shortName: "CA", platform: .kick),
-        Channel(name: "BinxBasilisk", shortName: "BB", platform: .twitch),
-        Channel(name: "KrispyW", shortName: "KW", platform: .youtube),
-        Channel(name: "Ice Poseidon", shortName: "IP", platform: .kick)
-    ]
+    private static let starterChannels: [Channel] = []
 
     @AppStorage("savedChannels") private var savedChannels = ""
     @AppStorage("savedChatters") private var savedChattersData = ""
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("keepScreenAwake") private var keepScreenAwake = false
+    @AppStorage("startWithAutoScroll") private var startWithAutoScroll = true
     @AppStorage("emoteBurstEnabled") private var emoteBurstEnabled = true
     @AppStorage("emoteBurstSize") private var emoteBurstSize = 300.0
     @AppStorage("emoteBurstOpacity") private var emoteBurstOpacity = 0.65
@@ -144,26 +140,10 @@ struct ContentView: View {
     @State private var exportDocument: ExportDocument?
     @State private var burstEmoji: String?
     @State private var burstToken = UUID()
+    @State private var isAutoFollowing = true
 
     private var messages: [ChatMessage] {
-        if !liveChat.messages.isEmpty { return liveChat.messages }
-        let examples: [(String, String, String?)] = [
-            ("cardlo", "CJ is a man with character", "SUB ×3"),
-            ("hoodneighbour", "this layout is looking clean", nil),
-            ("PinkyDaP", "the whole conversation in one place", "VIP"),
-            ("wraxter", "might be the best thing ever filmed", nil),
-            ("2moreweeks", "we are officially building on iOS", "OG")
-        ]
-        guard !channels.isEmpty else { return [] }
-        return examples.enumerated().map { index, example in
-            ChatMessage(
-                channel: channels[index % channels.count],
-                username: example.0,
-                text: example.1,
-                time: "1:25:\(String(format: "%02d", 4 + index * 4))",
-                badge: example.2
-            )
-        }
+        liveChat.messages
     }
 
     private var visibleMessages: [ChatMessage] {
@@ -308,9 +288,14 @@ struct ContentView: View {
                 counts[String(scalar), default: 0] += 1
             }
         }
-        return counts.map { ($0.key, $0.value) }
-            .sorted { $0.count == $1.count ? $0.emoji < $1.emoji : $0.count > $1.count }
-            .prefix(7).map { $0 }
+        var ranked: [(emoji: String, count: Int)] = counts.map { entry in
+            (emoji: entry.key, count: entry.value)
+        }
+        ranked.sort { left, right in
+            if left.count == right.count { return left.emoji < right.emoji }
+            return left.count > right.count
+        }
+        return Array(ranked.prefix(7))
     }
 
     @ViewBuilder private var pulseBar: some View {
@@ -407,36 +392,86 @@ struct ContentView: View {
     @ViewBuilder private var chatContent: some View {
         switch mode {
         case .river:
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(visibleMessages) { message in
-                            MessageRow(message: message) { inspectedMessage = message }.id(message.id)
+            if enabledChannels.isEmpty {
+                emptyChatState
+            } else {
+                ScrollViewReader { proxy in
+                    ZStack(alignment: .bottomTrailing) {
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(visibleMessages) { message in
+                                    MessageRow(message: message) { inspectedMessage = message }.id(message.id)
+                                }
+                            }
+                        }
+                        .simultaneousGesture(DragGesture().onChanged { _ in isAutoFollowing = false })
+                        HStack(spacing: 8) {
+                            Button {
+                                isAutoFollowing = false
+                                if let first = visibleMessages.first { withAnimation { proxy.scrollTo(first.id, anchor: .top) } }
+                            } label: {
+                                Image(systemName: "arrow.up.to.line").frame(width: 44, height: 44)
+                            }
+                            Button {
+                                isAutoFollowing = true
+                                if let last = visibleMessages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                            } label: {
+                                Image(systemName: "arrow.down.to.line").frame(width: 44, height: 44)
+                            }
+                        }
+                        .foregroundStyle(NabColors.text).background(NabColors.raised, in: Capsule()).padding(12)
+                    }
+                    .onAppear {
+                        isAutoFollowing = startWithAutoScroll
+                        if isAutoFollowing, let last = visibleMessages.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                    }
+                    .onChange(of: visibleMessages.count) { _ in
+                        if isAutoFollowing, let last = visibleMessages.last {
+                            withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(last.id, anchor: .bottom) }
                         }
                     }
                 }
-                .onAppear { if let last = visibleMessages.last { proxy.scrollTo(last.id, anchor: .bottom) } }
             }
         case .rooms:
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    ForEach(enabledChannels) { channel in
-                        RoomCard(channel: channel, messages: messages.filter { $0.channel == channel }) {
-                            inspectedChannel = channel
+            if enabledChannels.isEmpty {
+                emptyChatState
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(enabledChannels) { channel in
+                            RoomCard(channel: channel, messages: messages.filter { $0.channel == channel }) {
+                                inspectedChannel = channel
+                            }
                         }
-                    }
-                }.padding(14)
+                    }.padding(14)
+                }
             }
         case .rug:
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    ForEach(enabledChannels) { channel in
-                        RugCard(channel: channel, messages: messages.filter { $0.channel == channel }) { inspectedChannel = channel }
+            if enabledChannels.isEmpty {
+                emptyChatState
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(enabledChannels) { channel in
+                            RugCard(channel: channel, messages: messages.filter { $0.channel == channel }) { inspectedChannel = channel }
+                        }
                     }
+                        .padding(14)
                 }
-                    .padding(14)
             }
         }
+    }
+
+    private var emptyChatState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "text.bubble.fill").font(.system(size: 44)).foregroundStyle(NabColors.green)
+            Text("Your combined chat starts here")
+                .font(.system(size: 21, weight: .semibold, design: .serif)).foregroundStyle(NabColors.text)
+            Text("Add a chat channel to begin.").foregroundStyle(NabColors.secondary)
+            Button("ADD CHANNEL") { showingAddChannel = true }
+                .buttonStyle(.borderedProminent).tint(NabColors.green).foregroundStyle(.black)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var channelStrip: some View {
