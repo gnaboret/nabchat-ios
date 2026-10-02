@@ -136,6 +136,8 @@ struct ContentView: View {
     @State private var showingSettings = false
     @State private var showingAddChannel = false
     @State private var inspectedMessage: ChatMessage?
+    @State private var inspectedChannel: Channel?
+    @State private var exportDocument: ExportDocument?
 
     private var messages: [ChatMessage] {
         if !liveChat.messages.isEmpty { return liveChat.messages }
@@ -216,6 +218,15 @@ struct ContentView: View {
             MessageDetailView(message: message, isSaved: savedChatters.contains { $0.username.caseInsensitiveCompare(message.username) == .orderedSame && $0.platform == message.channel.platform }) {
                 saveChatter(from: message)
             }
+        }
+        .sheet(item: $exportDocument) { document in
+            ShareSheet(items: [document.url])
+        }
+        .sheet(item: $inspectedChannel) { channel in
+            ChannelDetailView(
+                channel: channel,
+                messages: liveChat.messages.filter { $0.channel.id == channel.id || ($0.channel.name == channel.name && $0.channel.platform == channel.platform) }
+            )
         }
         .fullScreenCover(isPresented: Binding(
             get: { !hasCompletedOnboarding },
@@ -343,13 +354,19 @@ struct ContentView: View {
             ScrollView {
                 LazyVStack(spacing: 12) {
                     ForEach(enabledChannels) { channel in
-                        RoomCard(channel: channel, messages: messages.filter { $0.channel == channel })
+                        RoomCard(channel: channel, messages: messages.filter { $0.channel == channel }) {
+                            inspectedChannel = channel
+                        }
                     }
                 }.padding(14)
             }
         case .rug:
             ScrollView {
-                LazyVStack(spacing: 12) { ForEach(enabledChannels) { RugCard(channel: $0) } }
+                LazyVStack(spacing: 12) {
+                    ForEach(enabledChannels) { channel in
+                        RugCard(channel: channel, messages: messages.filter { $0.channel == channel }) { inspectedChannel = channel }
+                    }
+                }
                     .padding(14)
             }
         }
@@ -391,6 +408,12 @@ struct ContentView: View {
                                 Circle().fill(chatter.platform.color).frame(width: 10, height: 10)
                                 Text(chatter.username).font(.system(size: 19, weight: .semibold, design: .serif))
                                 Spacer()
+                                Button {
+                                    exportChats(for: chatter)
+                                } label: {
+                                    Image(systemName: "square.and.arrow.down")
+                                }
+                                .buttonStyle(.plain).foregroundStyle(chatter.platform.color)
                                 Text(chatter.platform.rawValue.uppercased()).font(.caption2).foregroundStyle(chatter.platform.color)
                             }
                             let count = liveChat.messages.filter { $0.username.caseInsensitiveCompare(chatter.username) == .orderedSame && $0.channel.platform == chatter.platform }.count
@@ -413,6 +436,14 @@ struct ContentView: View {
                     .onDelete {
                         savedChatters.remove(atOffsets: $0)
                         persistSavedChatters()
+                    }
+                    Section {
+                        Button {
+                            exportAllSavedChats()
+                        } label: {
+                            Label("Export all saved chatter chats", systemImage: "square.and.arrow.up")
+                                .frame(maxWidth: .infinity)
+                        }
                     }
                 }
                 .listStyle(.plain)
@@ -474,6 +505,19 @@ struct ContentView: View {
 
     private func chatterColor(_ index: Int) -> Color {
         [NabColors.green, NabColors.purple, NabColors.youtube, .orange, .cyan, .pink][index % 6]
+    }
+
+    private func exportChats(for chatter: SavedChatter) {
+        let matching = liveChat.messages.filter {
+            $0.username.caseInsensitiveCompare(chatter.username) == .orderedSame && $0.channel.platform == chatter.platform
+        }
+        exportDocument = ChatExporter.makeDocument(messages: matching, filename: "nabchat-\(chatter.username)-chats.csv")
+    }
+
+    private func exportAllSavedChats() {
+        let identities = Set(savedChatters.map { "\($0.platform.rawValue):\($0.username.lowercased())" })
+        let matching = liveChat.messages.filter { identities.contains("\($0.channel.platform.rawValue):\($0.username.lowercased())") }
+        exportDocument = ChatExporter.makeDocument(messages: matching, filename: "nabchat-saved-chatters.csv")
     }
 
     private func navButton(_ item: AppSection) -> some View {
@@ -597,16 +641,17 @@ private struct ChannelPill: View {
 private struct RoomCard: View {
     let channel: Channel
     let messages: [ChatMessage]
+    let action: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            Button(action: action) { HStack {
                 Circle().fill(channel.platform.color.opacity(0.3)).frame(width: 36, height: 36)
                     .overlay(Text(channel.shortName).font(.caption.bold()))
                 Text(channel.name).font(.system(size: 19, design: .serif)).foregroundStyle(channel.platform.color)
                 Spacer()
                 Image(systemName: "link").foregroundStyle(channel.platform.color)
                 Text("\(messages.count) MSG").font(.caption2).foregroundStyle(NabColors.secondary)
-            }
+            }}.buttonStyle(.plain)
             ForEach(messages) { message in
                 Text("\(message.username): \(message.text)")
                     .font(.system(size: 14, design: .serif)).foregroundStyle(NabColors.text).lineLimit(1)
@@ -617,16 +662,35 @@ private struct RoomCard: View {
 
 private struct RugCard: View {
     let channel: Channel
+    let messages: [ChatMessage]
+    let action: () -> Void
+    private var messagesPerMinute: Int {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "H:mm:ss"
+        let calendar = Calendar.current
+        let now = calendar.dateComponents([.hour, .minute, .second], from: Date())
+        let nowSeconds = (now.hour ?? 0) * 3600 + (now.minute ?? 0) * 60 + (now.second ?? 0)
+        return messages.filter { message in
+            guard let date = formatter.date(from: message.time) else { return false }
+            let value = calendar.dateComponents([.hour, .minute, .second], from: date)
+            let messageSeconds = (value.hour ?? 0) * 3600 + (value.minute ?? 0) * 60 + (value.second ?? 0)
+            return (nowSeconds - messageSeconds + 86_400) % 86_400 <= 60
+        }.count
+    }
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            Button(action: action) { HStack {
                 Text(channel.name).font(.system(size: 19, design: .serif)).foregroundStyle(channel.platform.color)
                 Spacer()
-                Text("88 CHATTERS · 126/MIN ↑").font(.system(size: 10)).foregroundStyle(NabColors.secondary)
+                Text("\(Set(messages.map { $0.username.lowercased() }).count) CHATTERS · \(messagesPerMinute)/MIN")
+                    .font(.system(size: 10)).foregroundStyle(NabColors.secondary)
                 Text("WATCH NOW").font(.system(size: 10, weight: .bold)).foregroundStyle(channel.platform.color)
-            }.padding(13)
+            }}.buttonStyle(.plain).padding(13)
             HStack(spacing: 9) {
-                Text("chat keeps moving"); Text("all conversations together"); Text("nabchat on iOS")
+                ForEach(messages.suffix(3)) { message in
+                    Text("\(message.username): \(message.text)")
+                }
             }
             .font(.system(size: 13, design: .serif)).foregroundStyle(NabColors.text)
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -634,6 +698,76 @@ private struct RugCard: View {
         }
         .background(NabColors.surface, in: RoundedRectangle(cornerRadius: 16))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+private struct ChannelDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    let channel: Channel
+    let messages: [ChatMessage]
+
+    private var channelURL: URL? {
+        if let direct = URL(string: channel.name), direct.scheme != nil { return direct }
+        let value = channel.name.trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+            .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? channel.name
+        switch channel.platform {
+        case .kick: return URL(string: "https://kick.com/\(value)")
+        case .twitch: return URL(string: "https://twitch.tv/\(value)")
+        case .youtube: return URL(string: "https://youtube.com/@\(value)")
+        }
+    }
+
+    var body: some View {
+        NavigationView {
+            ScrollViewReader { proxy in
+                VStack(spacing: 0) {
+                    HStack(spacing: 10) {
+                        Circle().fill(channel.platform.color.opacity(0.3)).frame(width: 40, height: 40)
+                            .overlay(Text(channel.shortName).font(.caption.bold()))
+                        VStack(alignment: .leading) {
+                            Text(channel.name).font(.title3.bold()).foregroundStyle(channel.platform.color)
+                            Text("\(channel.platform.rawValue.capitalized) · \(messages.count) messages")
+                                .font(.caption).foregroundStyle(NabColors.secondary)
+                        }
+                        Spacer()
+                        if let channelURL {
+                            Button { openURL(channelURL) } label: { Label("Watch", systemImage: "arrow.up.right.square") }
+                                .font(.caption).foregroundStyle(channel.platform.color)
+                        }
+                    }
+                    .padding(14)
+                    Divider().overlay(NabColors.line)
+                    if messages.isEmpty {
+                        Spacer()
+                        Text("No saved chats for this channel yet.").foregroundStyle(NabColors.secondary)
+                        Spacer()
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(messages) { message in
+                                    MessageRow(message: message, action: {}).id(message.id)
+                                }
+                            }
+                        }
+                        HStack {
+                            Button { if let first = messages.first { proxy.scrollTo(first.id, anchor: .top) } } label: {
+                                Image(systemName: "arrow.up.to.line").frame(width: 44, height: 38)
+                            }
+                            Button { if let last = messages.last { proxy.scrollTo(last.id, anchor: .bottom) } } label: {
+                                Image(systemName: "arrow.down.to.line").frame(width: 44, height: 38)
+                            }
+                            Spacer()
+                        }
+                        .padding(.horizontal, 12).background(NabColors.surface)
+                    }
+                }
+                .background(NabColors.background.ignoresSafeArea())
+            }
+            .navigationTitle("All Chats")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Back") { dismiss() } } }
+        }
     }
 }
 
@@ -891,6 +1025,47 @@ private struct OnboardingView: View {
             .padding(24)
         }
     }
+}
+
+private struct ExportDocument: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+private enum ChatExporter {
+    static func makeDocument(messages: [ChatMessage], filename: String) -> ExportDocument? {
+        var lines = ["platform,channel,username,time,message"]
+        lines.append(contentsOf: messages.map {
+            [$0.channel.platform.rawValue, $0.channel.name, $0.username, $0.time, $0.text]
+                .map(csvField)
+                .joined(separator: ",")
+        })
+        let safeName = filename.replacingOccurrences(of: "/", with: "-")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(safeName)
+        do {
+            guard let data = lines.joined(separator: "\n").data(using: .utf8) else { return nil }
+            try data.write(to: url, options: .atomic)
+            return ExportDocument(url: url)
+        } catch {
+            return nil
+        }
+    }
+
+    private static func csvField(_ value: String) -> String {
+        "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
+    }
+}
+
+private struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        controller.popoverPresentationController?.sourceView = controller.view
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 #Preview { ContentView() }
