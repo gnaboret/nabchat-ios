@@ -2,6 +2,7 @@ import SwiftUI
 import NabchatShared
 import UIKit
 import UniformTypeIdentifiers
+import Combine
 
 private enum ChatMode: String, CaseIterable {
     case river = "RIVER", rooms = "ROOMS", rug = "RUG"
@@ -251,6 +252,7 @@ struct ContentView: View {
     @AppStorage("showEmoteOnlyMessages") private var showEmoteOnlyMessages = true
     @AppStorage("appearanceMode") private var appearanceMode = "Dark"
     @AppStorage("hiddenChatters") private var hiddenChatters = ""
+    @AppStorage("rugSortOrder") private var rugSortOrder = "most"
     @State private var channels = starterChannels
     @State private var savedChatters: [SavedChatter] = []
     @StateObject private var liveChat = LiveChatService()
@@ -291,6 +293,15 @@ struct ContentView: View {
     }
 
     private var enabledChannels: [Channel] { channels.filter(\.isEnabled) }
+
+    private var rugChannels: [Channel] {
+        enabledChannels.sorted { left, right in
+            let leftCount = Set(displayMessages.filter { $0.channel == left }.map { $0.username.lowercased() }).count
+            let rightCount = Set(displayMessages.filter { $0.channel == right }.map { $0.username.lowercased() }).count
+            if leftCount == rightCount { return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending }
+            return rugSortOrder == "least" ? leftCount < rightCount : leftCount > rightCount
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -530,6 +541,26 @@ struct ContentView: View {
                 .font(.system(size: 32, weight: .bold, design: .serif))
                 .foregroundStyle(NabColors.text)
             Spacer()
+            if section == .chat && mode == .rug {
+                Menu {
+                    Button {
+                        rugSortOrder = "most"
+                    } label: {
+                        Label("Most chatters first", systemImage: rugSortOrder == "most" ? "checkmark" : "arrow.down")
+                    }
+                    Button {
+                        rugSortOrder = "least"
+                    } label: {
+                        Label("Least chatters first", systemImage: rugSortOrder == "least" ? "checkmark" : "arrow.up")
+                    }
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 38, height: 38)
+                        .background(NabColors.purple.opacity(0.72), in: Circle())
+                }
+                .accessibilityLabel("Sort Rug channels")
+            }
             Button { showingSettings = true } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 18, weight: .medium))
@@ -663,7 +694,7 @@ struct ContentView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        ForEach(enabledChannels) { channel in
+                        ForEach(rugChannels) { channel in
                             RugCard(
                                 channel: channel,
                                 avatarURL: liveChat.channelAvatars[channel.id],
@@ -1067,13 +1098,16 @@ private struct ChannelPill: View {
                     }
                     LinearGradient(colors: [.clear, .black.opacity(0.72)], startPoint: .center, endPoint: .bottom)
                     Text(title)
-                        .font(.system(size: 14, weight: .semibold, design: .serif))
+                        .font(.system(size: 13, weight: .semibold, design: .serif))
                         .foregroundStyle(.white)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.62)
                         .shadow(color: .black, radius: 2)
-                        .padding(.horizontal, 5)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                        .padding(.bottom, 7)
+                        .padding(.horizontal, 6)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 24)
+                        .background(.black.opacity(0.68))
+                        .frame(maxHeight: .infinity, alignment: .bottom)
                 }
                 .frame(width: 108, height: 74)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -1154,9 +1188,32 @@ private struct RugCard: View {
                     .font(.system(size: 10)).foregroundStyle(NabColors.secondary)
                 Text("WATCH NOW").font(.system(size: 10, weight: .bold)).foregroundStyle(channel.platform.color)
             }}.buttonStyle(.plain).padding(13)
+            RugTicker(messages: Array(messages.suffix(20)), messageAction: messageAction)
+                .font(.system(size: 15, design: .serif)).foregroundStyle(NabColors.text)
+                .frame(height: 58)
+                .background(NabColors.raised.opacity(0.65)).clipped()
+        }
+        .background(NabColors.surface, in: RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+private struct RugTicker: View {
+    let messages: [ChatMessage]
+    let messageAction: (ChatMessage) -> Void
+    @State private var position = 0
+    private let timer = Timer.publish(every: 4.2, on: .main, in: .common).autoconnect()
+
+    private var repeatedMessages: [ChatMessage] {
+        guard !messages.isEmpty else { return [] }
+        return Array(repeating: messages, count: 3).flatMap { $0 }
+    }
+
+    var body: some View {
+        ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 10) {
-                    ForEach(messages.suffix(20)) { message in
+                    ForEach(Array(repeatedMessages.enumerated()), id: \.offset) { index, message in
                         Button { messageAction(message) } label: {
                             HStack(spacing: 4) {
                                 Text(message.username).foregroundStyle(NabColors.text)
@@ -1170,16 +1227,27 @@ private struct RugCard: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .id(index)
                     }
                 }
                 .padding(.horizontal, 12)
             }
-            .font(.system(size: 15, design: .serif)).foregroundStyle(NabColors.text)
-            .frame(height: 58)
-            .background(NabColors.raised.opacity(0.65)).clipped()
+            .onAppear {
+                position = messages.count
+                proxy.scrollTo(position, anchor: .leading)
+            }
+            .onReceive(timer) { _ in
+                guard messages.count > 1 else { return }
+                position += 1
+                withAnimation(.linear(duration: 1.0)) { proxy.scrollTo(position, anchor: .leading) }
+                if position >= messages.count * 2 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.05) {
+                        position = messages.count
+                        proxy.scrollTo(position, anchor: .leading)
+                    }
+                }
+            }
         }
-        .background(NabColors.surface, in: RoundedRectangle(cornerRadius: 16))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 
