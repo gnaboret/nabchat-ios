@@ -1231,53 +1231,63 @@ private struct RugCard: View {
 private struct RugTicker: View {
     let messages: [ChatMessage]
     let messageAction: (ChatMessage) -> Void
-    @State private var position = 0
-    private let timer = Timer.publish(every: 4.2, on: .main, in: .common).autoconnect()
-
-    private var repeatedMessages: [ChatMessage] {
-        guard !messages.isEmpty else { return [] }
-        return Array(repeating: messages, count: 3).flatMap { $0 }
-    }
+    @State private var contentWidth: CGFloat = 1
+    private let pointsPerSecond: CGFloat = 28
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 10) {
-                    ForEach(Array(repeatedMessages.enumerated()), id: \.offset) { index, message in
-                        Button { messageAction(message) } label: {
-                            HStack(spacing: 4) {
-                                Text(message.username).foregroundStyle(NabColors.text)
-                                Text(":").foregroundStyle(NabColors.secondary)
-                                Text(ChatMarkup.readable(message.text)).foregroundStyle(NabColors.text)
-                            }
-                            .lineLimit(1)
-                            .padding(.horizontal, 14)
-                            .frame(height: 42)
-                            .background(NabColors.raised, in: Capsule())
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .id(index)
+        GeometryReader { geometry in
+            if messages.isEmpty {
+                Text("Waiting for live chat…")
+                    .foregroundStyle(NabColors.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                    let travelled = CGFloat(timeline.date.timeIntervalSinceReferenceDate) * pointsPerSecond
+                    let offset = -(travelled.truncatingRemainder(dividingBy: max(contentWidth, 1)))
+                    HStack(spacing: 18) {
+                        tickerSequence
+                            .background(GeometryReader { sequenceGeometry in
+                                Color.clear.preference(key: RugTickerWidthKey.self, value: sequenceGeometry.size.width + 18)
+                            })
+                        tickerSequence
                     }
+                    .fixedSize(horizontal: true, vertical: false)
+                    .offset(x: offset)
+                    .frame(width: geometry.size.width, alignment: .leading)
                 }
-                .padding(.horizontal, 12)
-            }
-            .onAppear {
-                position = messages.count
-                proxy.scrollTo(position, anchor: .leading)
-            }
-            .onReceive(timer) { _ in
-                guard messages.count > 1 else { return }
-                position += 1
-                withAnimation(.linear(duration: 1.0)) { proxy.scrollTo(position, anchor: .leading) }
-                if position >= messages.count * 2 {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.05) {
-                        position = messages.count
-                        proxy.scrollTo(position, anchor: .leading)
-                    }
+                .onPreferenceChange(RugTickerWidthKey.self) { width in
+                    if width > 1 { contentWidth = width }
                 }
             }
         }
+        .clipped()
+    }
+
+    private var tickerSequence: some View {
+        HStack(spacing: 10) {
+            ForEach(messages) { message in
+                Button { messageAction(message) } label: {
+                    HStack(spacing: 4) {
+                        Text(message.username).foregroundStyle(NabColors.text)
+                        Text(":").foregroundStyle(NabColors.secondary)
+                        Text(ChatMarkup.readable(message.text)).foregroundStyle(NabColors.text)
+                    }
+                    .lineLimit(1)
+                    .padding(.horizontal, 14)
+                    .frame(height: 42)
+                    .background(NabColors.raised, in: Capsule())
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+private struct RugTickerWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 1
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
