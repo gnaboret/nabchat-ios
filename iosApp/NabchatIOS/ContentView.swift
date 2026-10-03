@@ -130,6 +130,7 @@ struct ContentView: View {
     @StateObject private var liveChat = LiveChatService()
     @StateObject private var twitchAuth = TwitchAuthService()
     @StateObject private var store = StoreManager()
+    @StateObject private var ads = AdManager()
     @State private var mode: ChatMode = .river
     @State private var section: AppSection = .chat
     @State private var selectedChannels: Set<UUID> = []
@@ -181,6 +182,9 @@ struct ContentView: View {
                         .allowsHitTesting(false)
                     }
                 }
+                if !store.isPlus && ads.canRequestAds {
+                    NabchatBannerAd()
+                }
                 pulseBar
                 channelStrip
                 bottomNavigation
@@ -194,6 +198,7 @@ struct ContentView: View {
             restoreSavedChatters()
             twitchAuth.validateSavedAuthorization()
             refreshProviders()
+            Task { await ads.configure() }
         }
         .onChange(of: channels) {
             persistChannels($0)
@@ -206,7 +211,7 @@ struct ContentView: View {
             refreshProviders()
         }
         .sheet(isPresented: $showingSettings) {
-            SettingsView(channels: $channels, liveChat: liveChat, twitchAuth: twitchAuth, store: store, coreStatus: SharedCoreInfo.shared.status())
+            SettingsView(channels: $channels, liveChat: liveChat, twitchAuth: twitchAuth, store: store, ads: ads, coreStatus: SharedCoreInfo.shared.status())
         }
         .sheet(isPresented: $showingAddChannel) {
             AddChannelView { channel in
@@ -978,6 +983,7 @@ private struct SettingsView: View {
     @ObservedObject var liveChat: LiveChatService
     @ObservedObject var twitchAuth: TwitchAuthService
     @ObservedObject var store: StoreManager
+    @ObservedObject var ads: AdManager
     let coreStatus: String
     @State private var confirmingClear = false
     @AppStorage("keepScreenAwake") private var keepScreenAwake = false
@@ -1083,6 +1089,9 @@ private struct SettingsView: View {
                 }
                 Section("About") {
                     Text(coreStatus)
+                    if ads.privacyOptionsRequired {
+                        Button("Privacy choices") { Task { await ads.presentPrivacyOptions() } }
+                    }
                     Link("Privacy Policy", destination: URL(string: "https://sites.google.com/view/nabchatprivacypolicy/home")!)
                     Link("Support & nabchat website", destination: URL(string: "https://gnaboret.ca/nabchat")!)
                     HStack {

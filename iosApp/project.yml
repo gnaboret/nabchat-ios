@@ -9,6 +9,14 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
 
+packages:
+  GoogleMobileAds:
+    url: https://github.com/googleads/swift-package-manager-google-mobile-ads.git
+    exactVersion: 13.11.0
+  GoogleUserMessagingPlatform:
+    url: https://github.com/googleads/swift-package-manager-google-user-messaging-platform.git
+    exactVersion: 3.1.0
+
 targets:
   NabchatIOS:
     type: application
@@ -18,6 +26,10 @@ targets:
     dependencies:
       - framework: ../shared/build/bin/iosSimulatorArm64/debugFramework/NabchatShared.framework
         embed: false
+      - package: GoogleMobileAds
+        product: GoogleMobileAds
+      - package: GoogleUserMessagingPlatform
+        product: GoogleUserMessagingPlatform
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nabchat.app
@@ -26,12 +38,15 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: nabchat
+        INFOPLIST_KEY_GADApplicationIdentifier: ca-app-pub-5870784629837288~9565748760
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        INFOPLIST_KEY_NSUserTrackingUsageDescription: "This helps keep nabchat free by measuring ad performance and showing relevant ads."
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_BackgroundColor: LaunchBackground
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"
         IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+        OTHER_LDFLAGS: "$(inherited) -ObjC"
 
 schemes:
   NabchatIOS:
