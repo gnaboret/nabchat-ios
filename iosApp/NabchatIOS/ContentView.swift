@@ -379,8 +379,8 @@ struct ContentView: View {
         .task {
             // Let the window and root view controller finish attaching before
             // UMP presents consent UI or the ads SDK initializes.
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            guard !Task.isCancelled else { return }
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled, !store.isPlus else { return }
             await ads.configure()
         }
         .onChange(of: channels) {
@@ -713,11 +713,11 @@ struct ContentView: View {
                     ScrollViewReader { proxy in
                         ScrollView(.horizontal, showsIndicators: false) {
                             LazyHStack(alignment: .top, spacing: 12) {
-                                ForEach(Array(Array(repeating: enabledChannels, count: 9).flatMap { $0 }.enumerated()), id: \.offset) { index, channel in
+                                ForEach(Array(Array(repeating: enabledChannels, count: 3).flatMap { $0 }.enumerated()), id: \.offset) { index, channel in
                                     RoomCard(
                                         channel: channel,
                                         avatarURL: liveChat.channelAvatars[channel.id],
-                                        messages: Array(roomMessages[channel.id, default: []].suffix(100)),
+                                        messages: Array(roomMessages[channel.id, default: []].suffix(50)),
                                         channelAction: { inspectedChannel = channel },
                                         messageAction: { inspectedMessage = $0 }
                                     )
@@ -727,7 +727,7 @@ struct ContentView: View {
                             }
                             .padding(.horizontal, 14).padding(.vertical, 12)
                         }
-                        .onAppear { proxy.scrollTo(enabledChannels.count * 4, anchor: .center) }
+                        .onAppear { proxy.scrollTo(enabledChannels.count, anchor: .center) }
                     }
                 }
             }

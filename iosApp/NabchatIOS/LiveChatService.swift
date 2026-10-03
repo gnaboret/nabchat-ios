@@ -54,11 +54,12 @@ final class LiveChatService: ObservableObject {
             guard let self else { return }
             while !Task.isCancelled {
                 var completedRequest = false
+                var cycleMessages: [ChatMessage] = []
                 for channel in kickChannels where !Task.isCancelled {
                     do {
                         let channelID = try await resolveKickID(for: channel)
                         let incoming = try await fetchKickMessages(channel: channel, channelID: channelID)
-                        appendNew(incoming)
+                        cycleMessages.append(contentsOf: incoming)
                         completedRequest = true
                     } catch is CancellationError {
                         return
@@ -66,6 +67,7 @@ final class LiveChatService: ObservableObject {
                         // One unavailable channel should not stop the other rooms.
                     }
                 }
+                appendNew(cycleMessages.sorted(by: chronologicalOrder))
                 kickConnected = completedRequest
                 refreshConnectionState(channels: allChannels)
                 try? await Task.sleep(nanoseconds: completedRequest ? 4_000_000_000 : 8_000_000_000)
@@ -209,14 +211,18 @@ final class LiveChatService: ObservableObject {
             while !Task.isCancelled {
                 var shortestDelay: TimeInterval = 10
                 var successful = false
+                var cycleMessages: [ChatMessage] = []
                 for channel in channels where !Task.isCancelled {
                     do {
                         var session = sessions[channel.id]
                         if session == nil {
                             let videoID = try await youtubeClient.discoverLiveVideoID(channelInput: channel.name)
                             guard let videoID else { continue }
-                            session = try await youtubeClient.openSession(videoID: videoID)
-                            if let avatarURL = session?.channelAvatarURL {
+                            async let openedSession = youtubeClient.openSession(videoID: videoID)
+                            async let fallbackAvatar = youtubeClient.discoverChannelAvatarURL(channelInput: channel.name)
+                            session = try await openedSession
+                            let discoveredAvatar = (try? await fallbackAvatar) ?? nil
+                            if let avatarURL = session?.channelAvatarURL ?? discoveredAvatar {
                                 channelAvatars[channel.id] = avatarURL
                             }
                         }
@@ -227,13 +233,14 @@ final class LiveChatService: ObservableObject {
                         let converted = result.messages.map {
                             ChatMessage(channel: channel, username: $0.username, text: $0.text, time: DateFormatter.chatTime.string(from: $0.date), badge: $0.badge, sourceID: "youtube:\($0.id)", avatarURL: $0.avatarURL)
                         }
-                        appendNew(converted)
+                        cycleMessages.append(contentsOf: converted)
                         shortestDelay = min(shortestDelay, result.delay)
                         successful = true
                     } catch {
                         sessions.removeValue(forKey: channel.id)
                     }
                 }
+                appendNew(cycleMessages.sorted(by: chronologicalOrder))
                 youtubeConnected = successful
                 refreshConnectionState(channels: allChannels)
                 let delay = successful ? shortestDelay : 15
@@ -311,6 +318,11 @@ final class LiveChatService: ObservableObject {
             guard !Task.isCancelled else { return }
             self?.flushPendingMessages()
         }
+    }
+
+    private func chronologicalOrder(_ left: ChatMessage, _ right: ChatMessage) -> Bool {
+        if left.time == right.time { return left.sourceID < right.sourceID }
+        return left.time < right.time
     }
 
     private func flushPendingMessages() {

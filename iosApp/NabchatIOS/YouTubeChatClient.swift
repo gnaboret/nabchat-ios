@@ -40,6 +40,20 @@ struct YouTubeChatClient: Sendable {
         return try await searchLiveVideoID(channelInput)
     }
 
+    func discoverChannelAvatarURL(channelInput: String) async throws -> String? {
+        let path = normalizedChannelPath(channelInput)
+        let page = try await getText("https://www.youtube.com/\(path)")
+        let patterns = [
+            #"<meta\s+property="og:image"\s+content="([^"]+)""#,
+            #"<meta\s+content="([^"]+)"\s+property="og:image""#,
+            #""avatar":\{"thumbnails":\[\{"url":"([^"]+)""#
+        ]
+        for pattern in patterns {
+            if let value = firstMatch(pattern, in: page) { return normalizedURL(value) }
+        }
+        return nil
+    }
+
     func openSession(videoID: String) async throws -> YouTubeChatSession {
         let watchPage = try await getText("https://www.youtube.com/watch?v=\(videoID)")
         let chatPage = try await getText("https://www.youtube.com/live_chat?v=\(videoID)&is_popout=1")
