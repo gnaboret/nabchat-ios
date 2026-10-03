@@ -594,7 +594,12 @@ struct ContentView: View {
                         ScrollView {
                             LazyVStack(spacing: 0) {
                                 ForEach(visibleMessages) { message in
-                                    MessageRow(message: message) { inspectedMessage = message }.id(message.id)
+                                    MessageRow(
+                                        message: message,
+                                        channelAvatarURL: liveChat.channelAvatars[message.channel.id],
+                                        highlightColor: savedChatterHighlight(for: message)
+                                    ) { inspectedMessage = message }
+                                    .id(message.id)
                                 }
                             }
                         }
@@ -830,6 +835,14 @@ struct ContentView: View {
         [NabColors.green, NabColors.purple, NabColors.youtube, .orange, .cyan, .pink][index % 6]
     }
 
+    private func savedChatterHighlight(for message: ChatMessage) -> Color? {
+        guard let chatter = savedChatters.first(where: {
+            $0.username.caseInsensitiveCompare(message.username) == .orderedSame &&
+            $0.platform == message.channel.platform
+        }) else { return nil }
+        return chatterColor(chatter.colorIndex)
+    }
+
     private func exportChats(for chatter: SavedChatter) {
         let matching = liveChat.messages.filter {
             $0.username.caseInsensitiveCompare(chatter.username) == .orderedSame && $0.channel.platform == chatter.platform
@@ -871,20 +884,47 @@ struct ContentView: View {
 
 private struct MessageRow: View {
     let message: ChatMessage
+    let channelAvatarURL: String?
+    let highlightColor: Color?
     let action: () -> Void
     @AppStorage("showTimestamps") private var showTimestamps = true
     @AppStorage("showProfilePictures") private var showProfilePictures = true
+
+    init(
+        message: ChatMessage,
+        channelAvatarURL: String? = nil,
+        highlightColor: Color? = nil,
+        action: @escaping () -> Void
+    ) {
+        self.message = message
+        self.channelAvatarURL = channelAvatarURL
+        self.highlightColor = highlightColor
+        self.action = action
+    }
+
     var body: some View {
         Button(action: action) {
             HStack(alignment: .top, spacing: 10) {
             if showProfilePictures {
-                ProfileAvatar(urlString: message.avatarURL, initials: String(message.username.prefix(2)).uppercased(), color: message.channel.platform.color, size: 39)
+                ProfileAvatar(
+                    urlString: channelAvatarURL,
+                    initials: String(message.channel.name.prefix(2)).uppercased(),
+                    color: message.channel.platform.color,
+                    size: 44
+                )
             }
             VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
+                    Text(message.channel.name)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(message.channel.platform.color)
+                    if let badge = message.badge {
+                        Text(badge.uppercased())
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(NabColors.secondary)
+                    }
                     Text("@").foregroundStyle(message.channel.platform.color)
-                    Text(message.username).foregroundStyle(message.channel.platform.color)
-                    if let badge = message.badge { Text(badge).font(.system(size: 9)).foregroundStyle(NabColors.secondary) }
+                    Text(message.username).foregroundStyle(NabColors.text)
                     Spacer()
                     if showTimestamps {
                         Text(message.time).font(.system(size: 10)).foregroundStyle(message.channel.platform.color.opacity(0.72))
@@ -894,9 +934,12 @@ private struct MessageRow: View {
             }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .background(highlightColor?.opacity(0.16) ?? Color.clear, in: RoundedRectangle(cornerRadius: 12))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain).font(.system(size: 16, design: .serif)).padding(.horizontal, 14).padding(.vertical, 11)
+        .buttonStyle(.plain).font(.system(size: 16, design: .serif)).padding(.horizontal, 8).padding(.vertical, 3)
     }
 }
 
