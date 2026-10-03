@@ -1,6 +1,6 @@
 import AppTrackingTransparency
 import GoogleMobileAds
-import GoogleUserMessagingPlatform
+import UserMessagingPlatform
 import SwiftUI
 
 @MainActor
