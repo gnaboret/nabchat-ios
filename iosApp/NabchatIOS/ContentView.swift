@@ -272,8 +272,6 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView(channels: $channels, liveChat: liveChat, twitchAuth: twitchAuth, store: store, ads: ads, coreStatus: SharedCoreInfo.shared.status())
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingAddChannel) {
             AddChannelView { channel in
@@ -282,8 +280,6 @@ struct ContentView: View {
                 channels.append(newChannel)
                 selectedChannels = [channel.id]
             }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
         }
         .sheet(item: $inspectedMessage) { message in
             MessageDetailView(message: message, isSaved: savedChatters.contains { $0.username.caseInsensitiveCompare(message.username) == .orderedSame && $0.platform == message.channel.platform }) {
