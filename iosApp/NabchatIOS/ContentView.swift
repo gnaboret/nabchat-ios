@@ -636,19 +636,24 @@ struct ContentView: View {
                 emptyChatState
             } else {
                 GeometryReader { geometry in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(alignment: .top, spacing: 12) {
-                            ForEach(enabledChannels) { channel in
-                                RoomCard(
-                                    channel: channel,
-                                    avatarURL: liveChat.channelAvatars[channel.id],
-                                    messages: displayMessages.filter { $0.channel == channel },
-                                    channelAction: { inspectedChannel = channel },
-                                    messageAction: { inspectedMessage = $0 }
-                                )
-                                .frame(width: min(430, geometry.size.width - 28), height: max(220, geometry.size.height - 24), alignment: .top)
+                    ScrollViewReader { proxy in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(alignment: .top, spacing: 12) {
+                                ForEach(Array(Array(repeating: enabledChannels, count: 21).flatMap { $0 }.enumerated()), id: \.offset) { index, channel in
+                                    RoomCard(
+                                        channel: channel,
+                                        avatarURL: liveChat.channelAvatars[channel.id],
+                                        messages: displayMessages.filter { $0.channel == channel },
+                                        channelAction: { inspectedChannel = channel },
+                                        messageAction: { inspectedMessage = $0 }
+                                    )
+                                    .frame(width: min(430, geometry.size.width - 28), height: max(220, geometry.size.height - 24), alignment: .top)
+                                    .id(index)
+                                }
                             }
-                        }.padding(.horizontal, 14).padding(.vertical, 12)
+                            .padding(.horizontal, 14).padding(.vertical, 12)
+                        }
+                        .onAppear { proxy.scrollTo(enabledChannels.count * 10, anchor: .center) }
                     }
                 }
             }
@@ -923,7 +928,6 @@ private struct MessageRow: View {
                             .font(.system(size: 9, weight: .medium))
                             .foregroundStyle(NabColors.secondary)
                     }
-                    Text("@").foregroundStyle(message.channel.platform.color)
                     Text(message.username).foregroundStyle(NabColors.text)
                     Spacer()
                     if showTimestamps {
@@ -1051,16 +1055,37 @@ private struct ChannelPill: View {
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 7) {
-                if let initials = initials {
-                    ProfileAvatar(urlString: avatarURL, initials: initials, color: color, size: 48)
+            if let initials = initials {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10).fill(color.opacity(0.24))
+                    Text(initials).font(.system(size: 18, weight: .bold))
+                    if let avatarURL, let url = URL(string: avatarURL) {
+                        AsyncImage(url: url) { phase in
+                            if let image = phase.image { image.resizable().scaledToFill() }
+                            else if phase.error == nil { ProgressView().controlSize(.mini) }
+                        }
+                    }
+                    LinearGradient(colors: [.clear, .black.opacity(0.72)], startPoint: .center, endPoint: .bottom)
+                    Text(title)
+                        .font(.system(size: 14, weight: .semibold, design: .serif))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .shadow(color: .black, radius: 2)
+                        .padding(.horizontal, 5)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                        .padding(.bottom, 7)
                 }
-                Text(title).font(.system(size: 12, weight: .medium, design: .serif)).lineLimit(1)
+                .frame(width: 108, height: 74)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? color : NabColors.line, lineWidth: selected ? 3 : 1))
+            } else {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold, design: .serif))
+                    .frame(width: 70, height: 58)
+                    .background(selected ? color.opacity(0.55) : NabColors.raised)
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? Color.white.opacity(0.7) : NabColors.line))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
             }
-            .padding(.horizontal, initials == nil ? 18 : 7).frame(height: initials == nil ? 46 : 58)
-            .background(selected ? color.opacity(0.32) : NabColors.background)
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? color : NabColors.line, lineWidth: selected ? 2 : 1))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
         }.buttonStyle(.plain)
     }
 }
@@ -1085,17 +1110,25 @@ private struct RoomCard: View {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(messages) { message in
                         Button { messageAction(message) } label: {
-                            HStack(alignment: .top, spacing: 4) {
-                                Text("@").foregroundStyle(message.channel.platform.color)
-                                Text("\(message.username):")
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 4) {
+                                    Text("@").foregroundStyle(message.channel.platform.color)
+                                    Text(message.username)
+                                    if let badge = message.badge {
+                                        Text(badge.uppercased()).font(.system(size: 9)).foregroundStyle(NabColors.secondary)
+                                    }
+                                    Spacer()
+                                    Text(message.time).font(.system(size: 10)).foregroundStyle(message.channel.platform.color.opacity(0.78))
+                                }
                                 Text(ChatMarkup.readable(message.text))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .font(.system(size: 15, design: .serif)).foregroundStyle(NabColors.text).lineLimit(2)
-                        .frame(height: 42, alignment: .top)
+                        .frame(minHeight: 50, alignment: .top)
                     }
                 }
             }
@@ -1121,23 +1154,28 @@ private struct RugCard: View {
                     .font(.system(size: 10)).foregroundStyle(NabColors.secondary)
                 Text("WATCH NOW").font(.system(size: 10, weight: .bold)).foregroundStyle(channel.platform.color)
             }}.buttonStyle(.plain).padding(13)
-            HStack(spacing: 9) {
-                ForEach(messages.suffix(3)) { message in
-                    Button { messageAction(message) } label: {
-                        HStack(spacing: 4) {
-                            Text("@").foregroundStyle(message.channel.platform.color)
-                            Text("\(message.username):")
-                            ChatMessageContent(text: message.text)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 10) {
+                    ForEach(messages.suffix(20)) { message in
+                        Button { messageAction(message) } label: {
+                            HStack(spacing: 4) {
+                                Text(message.username).foregroundStyle(NabColors.text)
+                                Text(":").foregroundStyle(NabColors.secondary)
+                                Text(ChatMarkup.readable(message.text)).foregroundStyle(NabColors.text)
+                            }
+                            .lineLimit(1)
+                            .padding(.horizontal, 14)
+                            .frame(height: 42)
+                            .background(NabColors.raised, in: Capsule())
+                            .contentShape(Rectangle())
                         }
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, minHeight: 54, maxHeight: 54, alignment: .topLeading)
-                    .clipped()
                 }
+                .padding(.horizontal, 12)
             }
             .font(.system(size: 15, design: .serif)).foregroundStyle(NabColors.text)
-            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 58)
             .background(NabColors.raised.opacity(0.65)).clipped()
         }
         .background(NabColors.surface, in: RoundedRectangle(cornerRadius: 16))
