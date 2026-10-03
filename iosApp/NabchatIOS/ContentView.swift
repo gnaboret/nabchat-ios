@@ -3,6 +3,7 @@ import NabchatShared
 import UIKit
 import UniformTypeIdentifiers
 import Combine
+import SafariServices
 
 private enum ChatMode: String, CaseIterable {
     case river = "RIVER", rooms = "ROOMS", rug = "RUG"
@@ -1103,11 +1104,10 @@ private struct ChannelPill: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.62)
                         .shadow(color: .black, radius: 2)
-                        .padding(.horizontal, 6)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 24)
-                        .background(.black.opacity(0.68))
-                        .frame(maxHeight: .infinity, alignment: .bottom)
+                        .padding(.horizontal, 9)
+                        .frame(maxWidth: 100)
+                        .frame(height: 27)
+                        .background(.black.opacity(0.76), in: Capsule())
                 }
                 .frame(width: 108, height: 74)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -1373,7 +1373,6 @@ private struct ChatterHistoryView: View {
 
 private struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
     @Binding var channels: [Channel]
     @ObservedObject var liveChat: LiveChatService
     @ObservedObject var twitchAuth: TwitchAuthService
@@ -1384,6 +1383,7 @@ private struct SettingsView: View {
     @State private var exportDocument: ExportDocument?
     @State private var showingImporter = false
     @State private var importMessage: String?
+    @State private var twitchBrowser: TwitchBrowserDestination?
     @AppStorage("keepScreenAwake") private var keepScreenAwake = false
     @AppStorage("showTimestamps") private var showTimestamps = true
     @AppStorage("showProfilePictures") private var showProfilePictures = true
@@ -1538,8 +1538,17 @@ private struct SettingsView: View {
                 Text("This cannot be undone.")
             }
             .sheet(item: $exportDocument) { document in ShareSheet(items: [document.url]) }
+            .sheet(item: $twitchBrowser, onDismiss: { twitchAuth.resumeAfterReturningToApp() }) { destination in
+                TwitchBrowserView(url: destination.url)
+                    .ignoresSafeArea()
+            }
             .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json]) { result in
                 importBackup(result)
+            }
+            .onChange(of: twitchAuth.state) { state in
+                if case .awaitingApproval(_, let url) = state {
+                    twitchBrowser = TwitchBrowserDestination(url: url)
+                }
             }
         }
         .navigationViewStyle(.stack)
@@ -1598,7 +1607,7 @@ private struct SettingsView: View {
                 HStack {
                     Button("Copy code") { UIPasteboard.general.string = code }
                     Spacer()
-                    Button("Open Twitch activation") { openURL(url) }
+                    Button("Open Twitch activation") { twitchBrowser = TwitchBrowserDestination(url: url) }
                 }.font(.caption)
             }
         case .connected(let login):
@@ -1711,6 +1720,24 @@ private struct OnboardingView: View {
 private struct ExportDocument: Identifiable {
     let id = UUID()
     let url: URL
+}
+
+private struct TwitchBrowserDestination: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+private struct TwitchBrowserView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        let controller = SFSafariViewController(url: url)
+        controller.preferredControlTintColor = UIColor(NabColors.purple)
+        controller.dismissButtonStyle = .done
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
 }
 
 private enum ChatRate {

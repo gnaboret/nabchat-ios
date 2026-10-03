@@ -104,9 +104,8 @@ final class TwitchAuthService: ObservableObject {
                 return
             } catch TwitchAuthError.pending, TwitchAuthError.slowDown {
                 continue
-            } catch TwitchAuthError.server(_) {
-                // Brief network/server errors should not discard an otherwise valid device code.
-                continue
+            } catch let error as TwitchAuthError {
+                throw error
             }
         }
         throw TwitchAuthError.expired
