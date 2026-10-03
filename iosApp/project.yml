@@ -41,6 +41,7 @@ targets:
         INFOPLIST_KEY_GADApplicationIdentifier: ca-app-pub-5870784629837288~9565748760
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         INFOPLIST_KEY_NSUserTrackingUsageDescription: "This helps keep nabchat free by measuring ad performance and showing relevant ads."
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_BackgroundColor: LaunchBackground
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
