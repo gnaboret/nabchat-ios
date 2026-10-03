@@ -17,25 +17,25 @@ final class AdManager: ObservableObject {
         defer { isConfiguring = false }
 
         do {
-            try await ConsentInformation.shared.requestConsentInfoUpdate(with: RequestParameters())
-            try await ConsentForm.loadAndPresentIfRequired(from: Self.presentingViewController)
+            try await UMPConsentInformation.sharedInstance.requestConsentInfoUpdate(with: UMPRequestParameters())
+            try await UMPConsentForm.loadAndPresentIfRequired(from: Self.presentingViewController)
         } catch {
             // A previous consent decision can still permit an ad request.
         }
 
-        privacyOptionsRequired = ConsentInformation.shared.privacyOptionsRequirementStatus == .required
-        canRequestAds = ConsentInformation.shared.canRequestAds
+        privacyOptionsRequired = UMPConsentInformation.sharedInstance.privacyOptionsRequirementStatus == .required
+        canRequestAds = UMPConsentInformation.sharedInstance.canRequestAds
         guard canRequestAds, !hasStartedSDK else { return }
 
         await requestTrackingPermissionIfNeeded()
-        await MobileAds.shared.start()
+        await GADMobileAds.sharedInstance().start()
         hasStartedSDK = true
     }
 
     func presentPrivacyOptions() async {
         do {
-            try await ConsentForm.presentPrivacyOptionsForm(from: Self.presentingViewController)
-            canRequestAds = ConsentInformation.shared.canRequestAds
+            try await UMPConsentForm.presentPrivacyOptionsForm(from: Self.presentingViewController)
+            canRequestAds = UMPConsentInformation.sharedInstance.canRequestAds
         } catch {
             // Keep the current consent state if the form is unavailable.
         }
@@ -71,8 +71,8 @@ struct NabchatBannerAd: View {
 }
 
 private struct BannerViewContainer: UIViewRepresentable {
-    func makeUIView(context: Context) -> BannerView {
-        let banner = BannerView(adSize: AdSizeBanner)
+    func makeUIView(context: Context) -> GADBannerView {
+        let banner = GADBannerView(adSize: GADAdSizeBanner)
 #if DEBUG
         banner.adUnitID = "ca-app-pub-3940256099942544/2435281174"
 #else
@@ -81,7 +81,7 @@ private struct BannerViewContainer: UIViewRepresentable {
         return banner
     }
 
-    func updateUIView(_ banner: BannerView, context: Context) {
+    func updateUIView(_ banner: GADBannerView, context: Context) {
         guard banner.rootViewController == nil,
               let root = UIApplication.shared.connectedScenes
                 .compactMap({ $0 as? UIWindowScene })
@@ -89,6 +89,6 @@ private struct BannerViewContainer: UIViewRepresentable {
                 .first(where: \.isKeyWindow)?
                 .rootViewController else { return }
         banner.rootViewController = root
-        banner.load(Request())
+        banner.load(GADRequest())
     }
 }
