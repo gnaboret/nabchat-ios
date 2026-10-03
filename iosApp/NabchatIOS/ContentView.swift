@@ -281,9 +281,12 @@ struct ContentView: View {
     @State private var pendingChatterDeletion: IndexSet?
 
     private var messages: [ChatMessage] {
-        guard !showLikelySpam else { return liveChat.messages }
+        guard !showLikelySpam else { return Array(liveChat.messages.suffix(1_000)) }
         var lastOccurrence: [String: Int] = [:]
-        return liveChat.messages.enumerated().compactMap { index, message in
+        // The UI only needs recent traffic. Keeping the full archive out of this
+        // hot path makes switching layouts independent of stored-history size.
+        let recent = liveChat.messages.suffix(1_000)
+        return recent.enumerated().compactMap { index, message in
             guard message.channel.platform == .twitch else { return message }
             let normalized = SpamDetector.normalized(message.text)
             let duplicateKey = "\(message.username.lowercased())|\(normalized)"
@@ -296,12 +299,14 @@ struct ContentView: View {
     private var visibleMessages: [ChatMessage] {
         let available = messages.filter { !hiddenChatterSet.contains($0.username.lowercased()) }
         let selected = selectedChannels.isEmpty ? available : available.filter { selectedChannels.contains($0.channel.id) }
-        return showEmoteOnlyMessages ? selected : selected.filter { ChatMarkup.emotesOnly(in: $0.text) == nil }
+        let filtered = showEmoteOnlyMessages ? selected : selected.filter { ChatMarkup.emotesOnly(in: $0.text) == nil }
+        return Array(filtered.suffix(600))
     }
 
     private var displayMessages: [ChatMessage] {
         let available = messages.filter { !hiddenChatterSet.contains($0.username.lowercased()) }
-        return showEmoteOnlyMessages ? available : available.filter { ChatMarkup.emotesOnly(in: $0.text) == nil }
+        let filtered = showEmoteOnlyMessages ? available : available.filter { ChatMarkup.emotesOnly(in: $0.text) == nil }
+        return Array(filtered.suffix(600))
     }
 
     private var hiddenChatterSet: Set<String> {
@@ -688,14 +693,15 @@ struct ContentView: View {
                 emptyChatState
             } else {
                 GeometryReader { geometry in
+                    let roomMessages = Dictionary(grouping: displayMessages, by: { $0.channel.id })
                     ScrollViewReader { proxy in
                         ScrollView(.horizontal, showsIndicators: false) {
                             LazyHStack(alignment: .top, spacing: 12) {
-                                ForEach(Array(Array(repeating: enabledChannels, count: 21).flatMap { $0 }.enumerated()), id: \.offset) { index, channel in
+                                ForEach(Array(Array(repeating: enabledChannels, count: 9).flatMap { $0 }.enumerated()), id: \.offset) { index, channel in
                                     RoomCard(
                                         channel: channel,
                                         avatarURL: liveChat.channelAvatars[channel.id],
-                                        messages: displayMessages.filter { $0.channel == channel },
+                                        messages: Array(roomMessages[channel.id, default: []].suffix(100)),
                                         channelAction: { inspectedChannel = channel },
                                         messageAction: { inspectedMessage = $0 }
                                     )
@@ -705,7 +711,7 @@ struct ContentView: View {
                             }
                             .padding(.horizontal, 14).padding(.vertical, 12)
                         }
-                        .onAppear { proxy.scrollTo(enabledChannels.count * 10, anchor: .center) }
+                        .onAppear { proxy.scrollTo(enabledChannels.count * 4, anchor: .center) }
                     }
                 }
             }
@@ -1246,11 +1252,13 @@ private struct RugTicker: View {
     let messageAction: (ChatMessage) -> Void
     @State private var contentWidth: CGFloat = 1
     @State private var horizontalOffset: CGFloat = 0
-    private let pointsPerSecond: CGFloat = 28
+    @State private var displayedMessages: [ChatMessage] = []
+    @State private var pendingRefresh: Task<Void, Never>?
+    private let pointsPerSecond: CGFloat = 42
 
     var body: some View {
         GeometryReader { geometry in
-            if messages.isEmpty {
+            if displayedMessages.isEmpty {
                 Text("Waiting for live chat…")
                     .foregroundStyle(NabColors.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1269,18 +1277,32 @@ private struct RugTicker: View {
                     guard width > 1, abs(width - contentWidth) > 1 else { return }
                     contentWidth = width
                     horizontalOffset = 0
-                    withAnimation(.linear(duration: max(1, width / pointsPerSecond)).repeatForever(autoreverses: false)) {
+                    let duration = max(1, width / pointsPerSecond)
+                    withAnimation(.linear(duration: duration).repeatForever(autoreverses: false)) {
                         horizontalOffset = -width
                     }
+                    scheduleRefresh(after: duration)
                 }
             }
         }
         .clipped()
+        .onAppear { refreshDisplayedMessages() }
+        .onChange(of: messages.map(\.id)) { _ in
+            if displayedMessages.isEmpty {
+                refreshDisplayedMessages()
+            } else if pendingRefresh == nil {
+                scheduleRefresh(after: max(1, contentWidth / pointsPerSecond))
+            }
+        }
+        .onDisappear {
+            pendingRefresh?.cancel()
+            pendingRefresh = nil
+        }
     }
 
     private var tickerSequence: some View {
         HStack(spacing: 10) {
-            ForEach(messages) { message in
+            ForEach(displayedMessages) { message in
                 Button { messageAction(message) } label: {
                     HStack(spacing: 4) {
                         Text(message.username).foregroundStyle(NabColors.text)
@@ -1296,6 +1318,26 @@ private struct RugTicker: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private func scheduleRefresh(after duration: TimeInterval) {
+        guard pendingRefresh == nil else { return }
+        pendingRefresh = Task { @MainActor in
+            // Swap in a new batch only after the current batch has made a full
+            // pass. Incoming messages therefore cannot reset a half-seen row.
+            try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            pendingRefresh = nil
+            refreshDisplayedMessages()
+        }
+    }
+
+    private func refreshDisplayedMessages() {
+        let latest = Array(messages.suffix(10))
+        guard latest.map(\.id) != displayedMessages.map(\.id) else { return }
+        displayedMessages = latest
+        contentWidth = 1
+        horizontalOffset = 0
     }
 }
 
