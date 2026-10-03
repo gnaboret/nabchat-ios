@@ -118,7 +118,12 @@ private struct ProfileAvatar: View {
 private struct ChatEmote: Identifiable {
     let id: String
     let name: String
-    var url: URL? { URL(string: "https://files.kick.com/emotes/\(id)/fullsize") }
+    var url: URL? {
+        if id.hasPrefix("twitch-") {
+            return URL(string: "https://static-cdn.jtvnw.net/emoticons/v2/\(id.dropFirst(7))/default/dark/3.0")
+        }
+        return URL(string: "https://files.kick.com/emotes/\(id)/fullsize")
+    }
 }
 
 private enum ChatPart: Identifiable {
@@ -128,7 +133,7 @@ private enum ChatPart: Identifiable {
 }
 
 private enum ChatMarkup {
-    private static let pattern = #"\[emote:(\d+):([^\]]+)\]"#
+    private static let pattern = #"\[emote:([^:\]]+):([^\]]+)\]"#
 
     static func emotesOnly(in text: String) -> [ChatEmote]? {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
@@ -251,6 +256,7 @@ struct ContentView: View {
     @AppStorage("emoteBurstOpacity") private var emoteBurstOpacity = 0.65
     @AppStorage("pulseBarSize") private var pulseBarSize = 1.0
     @AppStorage("showEmoteOnlyMessages") private var showEmoteOnlyMessages = true
+    @AppStorage("showLikelySpam") private var showLikelySpam = false
     @AppStorage("appearanceMode") private var appearanceMode = "Dark"
     @AppStorage("hiddenChatters") private var hiddenChatters = ""
     @AppStorage("rugSortOrder") private var rugSortOrder = "most"
@@ -275,7 +281,16 @@ struct ContentView: View {
     @State private var pendingChatterDeletion: IndexSet?
 
     private var messages: [ChatMessage] {
-        liveChat.messages
+        guard !showLikelySpam else { return liveChat.messages }
+        var lastOccurrence: [String: Int] = [:]
+        return liveChat.messages.enumerated().compactMap { index, message in
+            guard message.channel.platform == .twitch else { return message }
+            let normalized = SpamDetector.normalized(message.text)
+            let duplicateKey = "\(message.username.lowercased())|\(normalized)"
+            let repeatedRecently = !normalized.isEmpty && lastOccurrence[duplicateKey].map { index - $0 <= 24 } == true
+            lastOccurrence[duplicateKey] = index
+            return SpamDetector.isLikelySpam(message.text) || repeatedRecently ? nil : message
+        }
     }
 
     private var visibleMessages: [ChatMessage] {
@@ -294,15 +309,6 @@ struct ContentView: View {
     }
 
     private var enabledChannels: [Channel] { channels.filter(\.isEnabled) }
-
-    private var rugChannels: [Channel] {
-        enabledChannels.sorted { left, right in
-            let leftCount = Set(displayMessages.filter { $0.channel == left }.map { $0.username.lowercased() }).count
-            let rightCount = Set(displayMessages.filter { $0.channel == right }.map { $0.username.lowercased() }).count
-            if leftCount == rightCount { return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending }
-            return rugSortOrder == "least" ? leftCount < rightCount : leftCount > rightCount
-        }
-    }
 
     private var analyticsChannels: [Channel] {
         selectedChannels.isEmpty ? enabledChannels : enabledChannels.filter { selectedChannels.contains($0.id) }
@@ -707,13 +713,20 @@ struct ContentView: View {
             if enabledChannels.isEmpty {
                 emptyChatState
             } else {
+                let groupedMessages = Dictionary(grouping: displayMessages, by: { $0.channel.id })
+                let orderedChannels = enabledChannels.sorted { left, right in
+                    let leftCount = Set(groupedMessages[left.id, default: []].map { $0.username.lowercased() }).count
+                    let rightCount = Set(groupedMessages[right.id, default: []].map { $0.username.lowercased() }).count
+                    if leftCount == rightCount { return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending }
+                    return rugSortOrder == "least" ? leftCount < rightCount : leftCount > rightCount
+                }
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        ForEach(rugChannels) { channel in
+                        ForEach(orderedChannels) { channel in
                             RugCard(
                                 channel: channel,
                                 avatarURL: liveChat.channelAvatars[channel.id],
-                                messages: displayMessages.filter { $0.channel == channel },
+                                messages: groupedMessages[channel.id, default: []],
                                 channelAction: { inspectedChannel = channel },
                                 messageAction: { inspectedMessage = $0 }
                             )
@@ -1232,6 +1245,7 @@ private struct RugTicker: View {
     let messages: [ChatMessage]
     let messageAction: (ChatMessage) -> Void
     @State private var contentWidth: CGFloat = 1
+    @State private var horizontalOffset: CGFloat = 0
     private let pointsPerSecond: CGFloat = 28
 
     var body: some View {
@@ -1241,22 +1255,23 @@ private struct RugTicker: View {
                     .foregroundStyle(NabColors.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-                    let travelled = CGFloat(timeline.date.timeIntervalSinceReferenceDate) * pointsPerSecond
-                    let offset = -(travelled.truncatingRemainder(dividingBy: max(contentWidth, 1)))
-                    HStack(spacing: 18) {
-                        tickerSequence
-                            .background(GeometryReader { sequenceGeometry in
-                                Color.clear.preference(key: RugTickerWidthKey.self, value: sequenceGeometry.size.width + 18)
-                            })
-                        tickerSequence
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
-                    .offset(x: offset)
-                    .frame(width: geometry.size.width, alignment: .leading)
+                HStack(spacing: 18) {
+                    tickerSequence
+                        .background(GeometryReader { sequenceGeometry in
+                            Color.clear.preference(key: RugTickerWidthKey.self, value: sequenceGeometry.size.width + 18)
+                        })
+                    tickerSequence
                 }
+                .fixedSize(horizontal: true, vertical: false)
+                .offset(x: horizontalOffset)
+                .frame(width: geometry.size.width, alignment: .leading)
                 .onPreferenceChange(RugTickerWidthKey.self) { width in
-                    if width > 1 { contentWidth = width }
+                    guard width > 1, abs(width - contentWidth) > 1 else { return }
+                    contentWidth = width
+                    horizontalOffset = 0
+                    withAnimation(.linear(duration: max(1, width / pointsPerSecond)).repeatForever(autoreverses: false)) {
+                        horizontalOffset = -width
+                    }
                 }
             }
         }
@@ -1782,18 +1797,44 @@ private struct TwitchBrowserView: UIViewControllerRepresentable {
 
 private enum ChatRate {
     static func messagesPerMinute(_ messages: [ChatMessage], now: Date = Date()) -> Int {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "H:mm:ss"
         let calendar = Calendar.current
         let current = calendar.dateComponents([.hour, .minute, .second], from: now)
         let currentSeconds = (current.hour ?? 0) * 3600 + (current.minute ?? 0) * 60 + (current.second ?? 0)
         return messages.filter { message in
-            guard let date = formatter.date(from: message.time) else { return false }
-            let value = calendar.dateComponents([.hour, .minute, .second], from: date)
-            let messageSeconds = (value.hour ?? 0) * 3600 + (value.minute ?? 0) * 60 + (value.second ?? 0)
-            return (currentSeconds - messageSeconds + 86_400) % 86_400 <= 60
+            let parts = message.time.split(separator: ":").compactMap { Int($0) }
+            guard parts.count == 3 else { return false }
+            let hour = parts[0], baseSeconds = hour * 3600 + parts[1] * 60 + parts[2]
+            var candidates = [baseSeconds]
+            if (1...12).contains(hour) { candidates.append((hour % 12 + 12) * 3600 + parts[1] * 60 + parts[2]) }
+            return (candidates.map { (currentSeconds - $0 + 86_400) % 86_400 }.min() ?? 61) <= 60
         }.count
+    }
+}
+
+private enum SpamDetector {
+    static func normalized(_ text: String) -> String {
+        text.lowercased()
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func isLikelySpam(_ text: String) -> Bool {
+        let value = normalized(text)
+        guard !value.isEmpty else { return true }
+        if value.count > 420 { return true }
+        if value.range(of: #"(.)\1{11,}"#, options: .regularExpression) != nil { return true }
+        if value.range(of: #"(?:https?://|www\.)"#, options: .regularExpression) != nil {
+            let links = value.components(separatedBy: "http").count - 1 + value.components(separatedBy: "www.").count - 1
+            if links >= 2 { return true }
+        }
+        let knownSpam = ["buy followers", "buy viewers", "cheap viewers", "best viewers", "bigfollows", "viewers at", "get followers at"]
+        if knownSpam.contains(where: value.contains) { return true }
+        let words = value.split(separator: " ").map(String.init)
+        if words.count >= 6 {
+            let largestRepeat = Dictionary(grouping: words, by: { $0 }).values.map(\.count).max() ?? 0
+            if largestRepeat >= 5 && largestRepeat * 2 >= words.count { return true }
+        }
+        return false
     }
 }
 

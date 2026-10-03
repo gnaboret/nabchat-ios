@@ -30,10 +30,13 @@ struct YouTubeChatClient: Sendable {
         if let direct = directVideoID(channelInput) { return direct }
         let path = normalizedChannelPath(channelInput)
         let page = try await getText("https://www.youtube.com/\(path)/live")
-        guard let player = extractJSONObject(page, variable: "ytInitialPlayerResponse"),
-              let details = player["videoDetails"] as? [String: Any],
-              details["isLiveContent"] as? Bool == true else { return nil }
-        return details["videoId"] as? String
+        if let player = extractJSONObject(page, variable: "ytInitialPlayerResponse"),
+           let details = player["videoDetails"] as? [String: Any],
+           details["isLiveContent"] as? Bool == true,
+           let videoID = details["videoId"] as? String {
+            return videoID
+        }
+        return try await searchLiveVideoID(channelInput)
     }
 
     func openSession(videoID: String) async throws -> YouTubeChatSession {
@@ -107,6 +110,32 @@ struct YouTubeChatClient: Sendable {
 
     private func directVideoID(_ input: String) -> String? {
         firstMatch(#"(?:youtu\.be/|[?&]v=|/live/)([A-Za-z0-9_-]{11})"#, in: input)
+    }
+
+    private func searchLiveVideoID(_ input: String) async throws -> String? {
+        let query = input
+            .replacingOccurrences(of: #"^https?://(www\.)?youtube\.com/"#, with: "", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: "@", with: "")
+            .split(whereSeparator: { $0 == "/" || $0 == "?" || $0 == "#" })
+            .last.map(String.init) ?? input
+        guard let encoded = "\(query) live".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return nil }
+        let results = try await getText("https://www.youtube.com/results?search_query=\(encoded)&sp=EgJAAQ%253D%253D")
+        let regex = try NSRegularExpression(pattern: #""videoId":"([A-Za-z0-9_-]{11})""#)
+        let matches = regex.matches(in: results, range: NSRange(results.startIndex..., in: results))
+        var checked = Set<String>()
+        for match in matches.prefix(24) {
+            guard let range = Range(match.range(at: 1), in: results) else { continue }
+            let candidate = String(results[range])
+            guard checked.insert(candidate).inserted else { continue }
+            let watchPage = try await getText("https://www.youtube.com/watch?v=\(candidate)")
+            if let player = extractJSONObject(watchPage, variable: "ytInitialPlayerResponse"),
+               let details = player["videoDetails"] as? [String: Any],
+               details["isLiveContent"] as? Bool == true {
+                return candidate
+            }
+            if checked.count >= 6 { break }
+        }
+        return nil
     }
 
     private func normalizedChannelPath(_ input: String) -> String {

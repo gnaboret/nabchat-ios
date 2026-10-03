@@ -9,7 +9,10 @@ final class LiveChatService: ObservableObject {
     private var pollingTask: Task<Void, Never>?
     private var twitchTask: Task<Void, Never>?
     private var youtubeTask: Task<Void, Never>?
+    private var messageFlushTask: Task<Void, Never>?
+    private var historySaveTask: Task<Void, Never>?
     private var twitchSocket: URLSessionWebSocketTask?
+    private var pendingMessages: [ChatMessage] = []
     private var seenMessageIDs = Set<String>()
     private var channelIDs: [UUID: String] = [:]
     private var kickConnected = false
@@ -26,6 +29,8 @@ final class LiveChatService: ObservableObject {
         pollingTask?.cancel()
         twitchTask?.cancel()
         youtubeTask?.cancel()
+        messageFlushTask?.cancel()
+        historySaveTask?.cancel()
         twitchSocket?.cancel(with: .goingAway, reason: nil)
     }
 
@@ -170,7 +175,19 @@ final class LiveChatService: ObservableObject {
               let messageID = string(event["message_id"]),
               let username = string(event["chatter_user_name"] ?? event["chatter_user_login"]),
               let message = event["message"] as? [String: Any],
-              let text = string(message["text"]) else { return nil }
+              let plainText = string(message["text"]) else { return nil }
+        let text: String
+        if let fragments = message["fragments"] as? [[String: Any]], !fragments.isEmpty {
+            text = fragments.compactMap { fragment in
+                guard let fragmentText = string(fragment["text"]) else { return nil }
+                if let emote = fragment["emote"] as? [String: Any], let emoteID = string(emote["id"]) {
+                    return "[emote:twitch-\(emoteID):\(fragmentText)]"
+                }
+                return fragmentText
+            }.joined()
+        } else {
+            text = plainText
+        }
         let badges = (event["badges"] as? [[String: Any]])?.compactMap { string($0["set_id"]) }.map { $0.uppercased() }.joined(separator: " · ")
         return ChatMessage(channel: channel, username: username, text: text, time: DateFormatter.chatTime.string(from: Date()), badge: badges?.nilIfEmpty, sourceID: "twitch:\(messageID)")
     }
@@ -224,6 +241,11 @@ final class LiveChatService: ObservableObject {
     }
 
     func clearHistory() {
+        messageFlushTask?.cancel()
+        messageFlushTask = nil
+        historySaveTask?.cancel()
+        historySaveTask = nil
+        pendingMessages.removeAll()
         messages.removeAll()
         seenMessageIDs.removeAll()
         try? FileManager.default.removeItem(at: historyURL)
@@ -280,10 +302,33 @@ final class LiveChatService: ObservableObject {
     private func appendNew(_ incoming: [ChatMessage]) {
         let fresh = incoming.filter { seenMessageIDs.insert($0.sourceID).inserted }
         guard !fresh.isEmpty else { return }
-        messages.append(contentsOf: fresh)
+        pendingMessages.append(contentsOf: fresh)
+        guard messageFlushTask == nil else { return }
+        messageFlushTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            self?.flushPendingMessages()
+        }
+    }
+
+    private func flushPendingMessages() {
+        messageFlushTask = nil
+        guard !pendingMessages.isEmpty else { return }
+        messages.append(contentsOf: pendingMessages)
+        pendingMessages.removeAll(keepingCapacity: true)
         if messages.count > 2_000 { messages.removeFirst(messages.count - 2_000) }
         if seenMessageIDs.count > 5_000 { seenMessageIDs = Set(messages.map(\.sourceID)) }
-        saveHistory()
+        scheduleHistorySave()
+    }
+
+    private func scheduleHistorySave() {
+        historySaveTask?.cancel()
+        historySaveTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            self?.saveHistory()
+            self?.historySaveTask = nil
+        }
     }
 
     private func loadHistory() {
@@ -372,7 +417,8 @@ private enum LiveChatError: Error {
 private extension DateFormatter {
     static let chatTime: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateFormat = "h:mm:ss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH:mm:ss"
         return formatter
     }()
 }
