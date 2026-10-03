@@ -14,6 +14,7 @@ final class TwitchAuthService: ObservableObject {
     @Published private(set) var state: State = .disconnected
     private let clientID = "4uda3hw7k1wm9m0gpw2ot2aksbh0lr"
     private var pollingTask: Task<Void, Never>?
+    private var pendingCode: DeviceCode?
 
     var accessToken: String? { KeychainStore.read("twitch-access-token") }
     var userID: String? { KeychainStore.read("twitch-user-id") }
@@ -41,6 +42,7 @@ final class TwitchAuthService: ObservableObject {
         pollingTask = Task {
             do {
                 let code = try await requestDeviceCode()
+                pendingCode = code
                 guard let url = URL(string: code.verificationURI) else { throw TwitchAuthError.invalidResponse }
                 state = .awaitingApproval(code: code.userCode, url: url)
                 try await awaitApproval(code)
@@ -54,8 +56,22 @@ final class TwitchAuthService: ObservableObject {
 
     func disconnect(message: String? = nil) {
         pollingTask?.cancel()
+        pendingCode = nil
         ["twitch-access-token", "twitch-refresh-token", "twitch-user-id"].forEach(KeychainStore.delete)
         state = message.map(State.failed) ?? .disconnected
+    }
+
+    func resumeAfterReturningToApp() {
+        guard case .awaitingApproval = state, let code = pendingCode else {
+            validateSavedAuthorization()
+            return
+        }
+        guard pollingTask == nil || pollingTask?.isCancelled == true else { return }
+        pollingTask = Task {
+            do { try await awaitApproval(code) }
+            catch is CancellationError { return }
+            catch { state = .failed(error.localizedDescription) }
+        }
     }
 
     private func requestDeviceCode() async throws -> DeviceCode {
@@ -84,8 +100,12 @@ final class TwitchAuthService: ObservableObject {
                 KeychainStore.save(token.accessToken, key: "twitch-access-token")
                 if let refresh = token.refreshToken { KeychainStore.save(refresh, key: "twitch-refresh-token") }
                 try await validate(token: token.accessToken)
+                pendingCode = nil
                 return
-            } catch TwitchAuthError.pending {
+            } catch TwitchAuthError.pending, TwitchAuthError.slowDown {
+                continue
+            } catch TwitchAuthError.server(_) {
+                // Brief network/server errors should not discard an otherwise valid device code.
                 continue
             }
         }
@@ -125,6 +145,7 @@ final class TwitchAuthService: ObservableObject {
         if (200...299).contains(http.statusCode) { return data }
         let body = String(data: data, encoding: .utf8) ?? ""
         if body.contains("authorization_pending") { throw TwitchAuthError.pending }
+        if body.contains("slow_down") { throw TwitchAuthError.slowDown }
         throw TwitchAuthError.server(body)
     }
 }
@@ -154,10 +175,11 @@ private struct ValidationResponse: Decodable {
 }
 
 private enum TwitchAuthError: LocalizedError {
-    case pending, expired, invalidResponse, server(String)
+    case pending, slowDown, expired, invalidResponse, server(String)
     var errorDescription: String? {
         switch self {
         case .pending: return "Waiting for Twitch approval"
+        case .slowDown: return "Twitch asked the app to wait a little longer"
         case .expired: return "The Twitch activation code expired"
         case .invalidResponse: return "Twitch returned an invalid response"
         case .server(let message): return message.isEmpty ? "Twitch sign-in failed" : message

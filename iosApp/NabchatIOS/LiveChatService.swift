@@ -204,7 +204,7 @@ final class LiveChatService: ObservableObject {
                         if let continuation = result.continuation { activeSession.continuation = continuation }
                         sessions[channel.id] = activeSession
                         let converted = result.messages.map {
-                            ChatMessage(channel: channel, username: $0.username, text: $0.text, time: DateFormatter.chatTime.string(from: $0.date), badge: $0.badge, sourceID: "youtube:\($0.id)")
+                            ChatMessage(channel: channel, username: $0.username, text: $0.text, time: DateFormatter.chatTime.string(from: $0.date), badge: $0.badge, sourceID: "youtube:\($0.id)", avatarURL: $0.avatarURL)
                         }
                         appendNew(converted)
                         shortestDelay = min(shortestDelay, result.delay)
@@ -225,6 +225,12 @@ final class LiveChatService: ObservableObject {
         messages.removeAll()
         seenMessageIDs.removeAll()
         try? FileManager.default.removeItem(at: historyURL)
+    }
+
+    func replaceHistory(with imported: [ChatMessage]) {
+        messages = Array(imported.suffix(2_000))
+        seenMessageIDs = Set(messages.map(\.sourceID))
+        saveHistory()
     }
 
     private func resolveKickID(for channel: Channel) async throws -> String {
@@ -253,13 +259,15 @@ final class LiveChatService: ObservableObject {
             let sender = (raw["sender"] as? [String: Any]) ?? (raw["user"] as? [String: Any]) ?? [:]
             let username = string(sender["username"] ?? sender["slug"]) ?? "unknown"
             let badge = kickBadge(from: sender)
+            let avatarURL = string(sender["profile_pic"] ?? sender["profile_picture"] ?? sender["profile_image"] ?? sender["avatar"])
             return ChatMessage(
                 channel: channel,
                 username: username,
                 text: text,
                 time: formattedTime(raw["created_at"]),
                 badge: badge,
-                sourceID: "kick:\(messageID)"
+                sourceID: "kick:\(messageID)",
+                avatarURL: avatarURL
             )
         }
     }

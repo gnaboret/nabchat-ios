@@ -6,6 +6,7 @@ struct YouTubeRawMessage {
     let text: String
     let badge: String?
     let date: Date
+    let avatarURL: String?
 }
 
 struct YouTubeChatSession {
@@ -82,7 +83,8 @@ struct YouTubeChatClient: Sendable {
         }.joined()
         let badgeKeys = collectBadgeKeys(renderer["authorBadges"])
         let micros = (renderer["timestampUsec"] as? String).flatMap(Double.init) ?? Date().timeIntervalSince1970 * 1_000_000
-        return YouTubeRawMessage(id: id, username: author, text: text, badge: badgeKeys.joined(separator: " · ").nilIfEmpty, date: Date(timeIntervalSince1970: micros / 1_000_000))
+        let avatarURL = (((renderer["authorPhoto"] as? [String: Any])?["thumbnails"] as? [[String: Any]])?.last?["url"] as? String)
+        return YouTubeRawMessage(id: id, username: author, text: text, badge: badgeKeys.joined(separator: " · ").nilIfEmpty, date: Date(timeIntervalSince1970: micros / 1_000_000), avatarURL: avatarURL)
     }
 
     private func getText(_ value: String) async throws -> String {

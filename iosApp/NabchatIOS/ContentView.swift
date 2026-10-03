@@ -1,6 +1,7 @@
 import SwiftUI
 import NabchatShared
 import UIKit
+import UniformTypeIdentifiers
 
 private enum ChatMode: String, CaseIterable {
     case river = "RIVER", rooms = "ROOMS", rug = "RUG"
@@ -73,8 +74,9 @@ struct ChatMessage: Identifiable, Codable {
     let time: String
     let badge: String?
     let sourceID: String
+    let avatarURL: String?
 
-    init(id: UUID = UUID(), channel: Channel, username: String, text: String, time: String, badge: String?, sourceID: String = UUID().uuidString) {
+    init(id: UUID = UUID(), channel: Channel, username: String, text: String, time: String, badge: String?, sourceID: String = UUID().uuidString, avatarURL: String? = nil) {
         self.id = id
         self.channel = channel
         self.username = username
@@ -82,6 +84,32 @@ struct ChatMessage: Identifiable, Codable {
         self.time = time
         self.badge = badge
         self.sourceID = sourceID
+        self.avatarURL = avatarURL
+    }
+}
+
+private struct ProfileAvatar: View {
+    let urlString: String?
+    let initials: String
+    let color: Color
+    let size: CGFloat
+
+    var body: some View {
+        ZStack {
+            Circle().fill(color.opacity(0.28))
+            Text(initials).font(.system(size: max(9, size * 0.27), weight: .bold))
+            if let urlString, let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else if phase.error == nil {
+                        ProgressView().controlSize(.mini)
+                    }
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
     }
 }
 
@@ -168,6 +196,7 @@ enum NabColors {
 }
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     private static let starterChannels: [Channel] = []
 
     @AppStorage("savedChannels") private var savedChannels = ""
@@ -179,6 +208,9 @@ struct ContentView: View {
     @AppStorage("emoteBurstSize") private var emoteBurstSize = 300.0
     @AppStorage("emoteBurstOpacity") private var emoteBurstOpacity = 0.65
     @AppStorage("pulseBarSize") private var pulseBarSize = 1.0
+    @AppStorage("showEmoteOnlyMessages") private var showEmoteOnlyMessages = true
+    @AppStorage("appearanceMode") private var appearanceMode = "Dark"
+    @AppStorage("hiddenChatters") private var hiddenChatters = ""
     @State private var channels = starterChannels
     @State private var savedChatters: [SavedChatter] = []
     @StateObject private var liveChat = LiveChatService()
@@ -204,7 +236,18 @@ struct ContentView: View {
     }
 
     private var visibleMessages: [ChatMessage] {
-        selectedChannels.isEmpty ? messages : messages.filter { selectedChannels.contains($0.channel.id) }
+        let available = messages.filter { !hiddenChatterSet.contains($0.username.lowercased()) }
+        let selected = selectedChannels.isEmpty ? available : available.filter { selectedChannels.contains($0.channel.id) }
+        return showEmoteOnlyMessages ? selected : selected.filter { ChatMarkup.emotesOnly(in: $0.text) == nil }
+    }
+
+    private var displayMessages: [ChatMessage] {
+        let available = messages.filter { !hiddenChatterSet.contains($0.username.lowercased()) }
+        return showEmoteOnlyMessages ? available : available.filter { ChatMarkup.emotesOnly(in: $0.text) == nil }
+    }
+
+    private var hiddenChatterSet: Set<String> {
+        Set(hiddenChatters.split(separator: "\n").map { String($0) })
     }
 
     private var enabledChannels: [Channel] { channels.filter(\.isEnabled) }
@@ -214,8 +257,10 @@ struct ContentView: View {
             NabColors.background.ignoresSafeArea()
             VStack(spacing: 0) {
                 header
-                modePicker
-                Divider().overlay(NabColors.line)
+                if section == .chat {
+                    modePicker
+                    Divider().overlay(NabColors.line)
+                }
                 Group {
                     switch section {
                     case .chat: chatContent
@@ -244,7 +289,7 @@ struct ContentView: View {
                 bottomNavigation
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(appearanceMode == "System" ? nil : appearanceMode == "Light" ? .light : .dark)
         .onChange(of: keepScreenAwake) { UIApplication.shared.isIdleTimerDisabled = $0 }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = keepScreenAwake
@@ -265,6 +310,9 @@ struct ContentView: View {
             refreshProviders()
         }
         .onChange(of: twitchAuth.state) { _ in refreshProviders() }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { twitchAuth.resumeAfterReturningToApp() }
+        }
         .onChange(of: liveChat.messages.count) { _ in triggerEmojiBurst() }
         .onChange(of: store.isPlus) { isPlus in
             if !isPlus { enforceFreeChannelLimit() }
@@ -282,9 +330,13 @@ struct ContentView: View {
             }
         }
         .sheet(item: $inspectedMessage) { message in
-            MessageDetailView(message: message, isSaved: savedChatters.contains { $0.username.caseInsensitiveCompare(message.username) == .orderedSame && $0.platform == message.channel.platform }) {
-                saveChatter(from: message)
-            }
+            MessageDetailView(
+                message: message,
+                recentMessages: messages.filter { $0.username.caseInsensitiveCompare(message.username) == .orderedSame },
+                isSaved: savedChatters.contains { $0.username.caseInsensitiveCompare(message.username) == .orderedSame && $0.platform == message.channel.platform },
+                onSave: { saveChatter(from: message) },
+                onHide: { hideChatter(message.username) }
+            )
         }
         .sheet(item: $exportDocument) { document in
             ShareSheet(items: [document.url])
@@ -359,6 +411,12 @@ struct ContentView: View {
         persistSavedChatters()
     }
 
+    private func hideChatter(_ username: String) {
+        var names = hiddenChatterSet
+        names.insert(username.lowercased())
+        hiddenChatters = names.sorted().joined(separator: "\n")
+    }
+
     private func refreshProviders() {
         liveChat.update(channels: enabledChannels, twitchToken: twitchAuth.accessToken, twitchUserID: twitchAuth.userID)
     }
@@ -388,12 +446,16 @@ struct ContentView: View {
         return Array(ranked.prefix(7))
     }
 
-    @ViewBuilder private var pulseBar: some View {
-        if !pulseItems.isEmpty {
-            HStack(spacing: 8) {
+    private var pulseBar: some View {
+        HStack(spacing: 8) {
                 Text("PULSE")
                     .font(.system(size: 11 * pulseBarSize, weight: .bold, design: .serif))
                     .foregroundStyle(NabColors.green)
+                if pulseItems.isEmpty {
+                    Text("Waiting for reactions…")
+                        .font(.system(size: 11 * pulseBarSize))
+                        .foregroundStyle(NabColors.secondary)
+                }
                 ForEach(Array(pulseItems.enumerated()), id: \.offset) { _, item in
                     HStack(spacing: 4) {
                         Text(item.emoji).font(.system(size: 18 * pulseBarSize))
@@ -403,11 +465,10 @@ struct ContentView: View {
                     .background(NabColors.raised, in: Capsule())
                 }
                 Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 14).padding(.vertical, 5)
-            .frame(maxWidth: .infinity).background(NabColors.background)
-            .overlay(alignment: .top) { Divider().overlay(NabColors.line) }
         }
+        .padding(.horizontal, 14).padding(.vertical, 5)
+        .frame(maxWidth: .infinity).background(NabColors.background)
+        .overlay(alignment: .top) { Divider().overlay(NabColors.line) }
     }
 
     private func triggerEmojiBurst() {
@@ -529,14 +590,20 @@ struct ContentView: View {
             if enabledChannels.isEmpty {
                 emptyChatState
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 12) {
-                        ForEach(enabledChannels) { channel in
-                            RoomCard(channel: channel, messages: messages.filter { $0.channel == channel }) {
-                                inspectedChannel = channel
+                GeometryReader { geometry in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(alignment: .top, spacing: 12) {
+                            ForEach(enabledChannels) { channel in
+                                RoomCard(
+                                    channel: channel,
+                                    messages: displayMessages.filter { $0.channel == channel },
+                                    channelAction: { inspectedChannel = channel },
+                                    messageAction: { inspectedMessage = $0 }
+                                )
+                                .frame(width: min(430, geometry.size.width - 28), height: max(220, geometry.size.height - 24), alignment: .top)
                             }
-                        }
-                    }.padding(14)
+                        }.padding(.horizontal, 14).padding(.vertical, 12)
+                    }
                 }
             }
         case .rug:
@@ -546,7 +613,12 @@ struct ContentView: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         ForEach(enabledChannels) { channel in
-                            RugCard(channel: channel, messages: messages.filter { $0.channel == channel }) { inspectedChannel = channel }
+                            RugCard(
+                                channel: channel,
+                                messages: displayMessages.filter { $0.channel == channel },
+                                channelAction: { inspectedChannel = channel },
+                                messageAction: { inspectedMessage = $0 }
+                            )
                         }
                     }
                         .padding(14)
@@ -756,11 +828,11 @@ private struct MessageRow: View {
         Button(action: action) {
             HStack(alignment: .top, spacing: 10) {
             if showProfilePictures {
-                Circle().fill(message.channel.platform.color.opacity(0.28)).frame(width: 39, height: 39)
-                    .overlay(Text(message.channel.shortName).font(.caption.bold()))
+                ProfileAvatar(urlString: message.avatarURL, initials: String(message.username.prefix(2)).uppercased(), color: message.channel.platform.color, size: 39)
             }
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
+                    Text("@").foregroundStyle(message.channel.platform.color)
                     Text(message.username).foregroundStyle(message.channel.platform.color)
                     if let badge = message.badge { Text(badge).font(.system(size: 9)).foregroundStyle(NabColors.secondary) }
                     Spacer()
@@ -812,15 +884,18 @@ private struct EmojiBurstView: View {
 private struct MessageDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let message: ChatMessage
+    let recentMessages: [ChatMessage]
     let isSaved: Bool
     let onSave: () -> Void
+    let onHide: () -> Void
+    @State private var markedAsBot = false
 
     var body: some View {
         NavigationView {
+            ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack {
-                    Circle().fill(message.channel.platform.color.opacity(0.3)).frame(width: 46, height: 46)
-                        .overlay(Text(message.channel.shortName).font(.caption.bold()))
+                    ProfileAvatar(urlString: message.avatarURL, initials: String(message.username.prefix(2)).uppercased(), color: message.channel.platform.color, size: 46)
                     VStack(alignment: .leading) {
                         Text(message.username).font(.title3.bold()).foregroundStyle(message.channel.platform.color)
                         Text("\(message.channel.platform.rawValue.capitalized) · \(message.channel.name)")
@@ -842,7 +917,30 @@ private struct MessageDetailView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent).tint(message.channel.platform.color).disabled(isSaved)
-                Spacer()
+                Button {
+                    markedAsBot.toggle()
+                } label: {
+                    Label(markedAsBot ? "Marked as bot" : "Label as bot", systemImage: markedAsBot ? "checkmark.circle.fill" : "cpu")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Button(role: .destructive) {
+                    onHide()
+                    dismiss()
+                } label: {
+                    Label("Hide this chatter everywhere", systemImage: "eye.slash")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Divider().overlay(NabColors.line)
+                Text("Recent chats").font(.headline)
+                ForEach(recentMessages.suffix(25)) { recent in
+                    HStack(alignment: .top, spacing: 6) {
+                        Text("@").foregroundStyle(recent.channel.platform.color)
+                        Text(recent.time).font(.caption).foregroundStyle(NabColors.secondary)
+                        ChatMessageContent(text: recent.text)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
             }
             .padding(22).background(NabColors.background.ignoresSafeArea())
             .navigationTitle("Chat Message").navigationBarTitleDisplayMode(.inline)
@@ -861,15 +959,15 @@ private struct ChannelPill: View {
         Button(action: action) {
             HStack(spacing: 7) {
                 if let initials = initials {
-                    Circle().fill(color.opacity(0.35)).frame(width: 35, height: 35)
+                    RoundedRectangle(cornerRadius: 7).fill(color.opacity(0.35)).frame(width: 35, height: 35)
                         .overlay(Text(initials).font(.system(size: 10, weight: .bold)))
                 }
                 Text(title).font(.system(size: 12, weight: .medium, design: .serif)).lineLimit(1)
             }
             .padding(.horizontal, initials == nil ? 18 : 7).frame(height: 46)
             .background(selected ? color.opacity(0.32) : NabColors.background)
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected ? color : NabColors.line, lineWidth: selected ? 2 : 1))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? color : NabColors.line, lineWidth: selected ? 2 : 1))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
         }.buttonStyle(.plain)
     }
 }
@@ -877,10 +975,11 @@ private struct ChannelPill: View {
 private struct RoomCard: View {
     let channel: Channel
     let messages: [ChatMessage]
-    let action: () -> Void
+    let channelAction: () -> Void
+    let messageAction: (ChatMessage) -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Button(action: action) { HStack {
+            Button(action: channelAction) { HStack {
                 Circle().fill(channel.platform.color.opacity(0.3)).frame(width: 36, height: 36)
                     .overlay(Text(channel.shortName).font(.caption.bold()))
                 Text(channel.name).font(.system(size: 19, design: .serif)).foregroundStyle(channel.platform.color)
@@ -888,24 +987,39 @@ private struct RoomCard: View {
                 Image(systemName: "link").foregroundStyle(channel.platform.color)
                 Text("\(messages.count) MSG").font(.caption2).foregroundStyle(NabColors.secondary)
             }}.buttonStyle(.plain)
-            ForEach(messages) { message in
-                HStack(spacing: 4) {
-                    Text("\(message.username):")
-                    ChatMessageContent(text: message.text)
+            Divider().overlay(NabColors.line)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(messages) { message in
+                        Button { messageAction(message) } label: {
+                            HStack(alignment: .top, spacing: 4) {
+                                ProfileAvatar(urlString: message.avatarURL, initials: String(message.username.prefix(2)).uppercased(), color: message.channel.platform.color, size: 28)
+                                Text("@").foregroundStyle(message.channel.platform.color)
+                                Text("\(message.username):")
+                                ChatMessageContent(text: message.text)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 15, design: .serif)).foregroundStyle(NabColors.text)
+                    }
                 }
-                .font(.system(size: 15, design: .serif)).foregroundStyle(NabColors.text).lineLimit(1)
             }
-        }.padding(13).background(NabColors.surface, in: RoundedRectangle(cornerRadius: 16))
+        }
+        .padding(13).frame(maxHeight: .infinity, alignment: .top)
+        .background(NabColors.surface, in: RoundedRectangle(cornerRadius: 16))
     }
 }
 
 private struct RugCard: View {
     let channel: Channel
     let messages: [ChatMessage]
-    let action: () -> Void
+    let channelAction: () -> Void
+    let messageAction: (ChatMessage) -> Void
     var body: some View {
         VStack(spacing: 0) {
-            Button(action: action) { HStack {
+            Button(action: channelAction) { HStack {
                 Text(channel.name).font(.system(size: 19, design: .serif)).foregroundStyle(channel.platform.color)
                 Spacer()
                 Text("\(Set(messages.map { $0.username.lowercased() }).count) CHATTERS · \(ChatRate.messagesPerMinute(messages))/MIN")
@@ -914,10 +1028,16 @@ private struct RugCard: View {
             }}.buttonStyle(.plain).padding(13)
             HStack(spacing: 9) {
                 ForEach(messages.suffix(3)) { message in
-                    HStack(spacing: 3) {
-                        Text("\(message.username):")
-                        ChatMessageContent(text: message.text)
+                    Button { messageAction(message) } label: {
+                        HStack(spacing: 4) {
+                            ProfileAvatar(urlString: message.avatarURL, initials: String(message.username.prefix(2)).uppercased(), color: message.channel.platform.color, size: 28)
+                            Text("@").foregroundStyle(message.channel.platform.color)
+                            Text("\(message.username):")
+                            ChatMessageContent(text: message.text)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
             }
             .font(.system(size: 15, design: .serif)).foregroundStyle(NabColors.text)
@@ -1059,6 +1179,9 @@ private struct SettingsView: View {
     @ObservedObject var ads: AdManager
     let coreStatus: String
     @State private var confirmingClear = false
+    @State private var exportDocument: ExportDocument?
+    @State private var showingImporter = false
+    @State private var importMessage: String?
     @AppStorage("keepScreenAwake") private var keepScreenAwake = false
     @AppStorage("showTimestamps") private var showTimestamps = true
     @AppStorage("showProfilePictures") private var showProfilePictures = true
@@ -1068,6 +1191,9 @@ private struct SettingsView: View {
     @AppStorage("emoteBurstSize") private var emoteBurstSize = 300.0
     @AppStorage("emoteBurstOpacity") private var emoteBurstOpacity = 0.65
     @AppStorage("pulseBarSize") private var pulseBarSize = 1.0
+    @AppStorage("showEmoteOnlyMessages") private var showEmoteOnlyMessages = true
+    @AppStorage("appearanceMode") private var appearanceMode = "Dark"
+    @AppStorage("messageArrivalMode") private var messageArrivalMode = "Auto"
     var body: some View {
         NavigationView {
             Form {
@@ -1108,13 +1234,27 @@ private struct SettingsView: View {
                     }
                 }
                 Section("Message Arrival") {
+                    Picker("Pacing", selection: $messageArrivalMode) {
+                        Text("Now").tag("Now")
+                        Text("One at a time").tag("One at a time")
+                        Text("Every 3 seconds").tag("Every 3 seconds")
+                        Text("Slow").tag("Slow")
+                        Text("Auto").tag("Auto")
+                    }
                     Toggle("Start with auto-scroll", isOn: $startWithAutoScroll)
                     Toggle("Keep screen on", isOn: $keepScreenAwake)
                     Toggle("Show likely spam messages", isOn: $showLikelySpam)
                 }
                 Section("Appearance") {
+                    Picker("Theme", selection: $appearanceMode) {
+                        Text("Dark").tag("Dark")
+                        Text("Light").tag("Light")
+                        Text("Newspaper").tag("Newspaper")
+                        Text("System").tag("System")
+                    }
                     Toggle("Show timestamps", isOn: $showTimestamps)
                     Toggle("Show profile pictures", isOn: $showProfilePictures)
+                    Toggle("Show emote-only messages", isOn: $showEmoteOnlyMessages)
                     Toggle("Emote bursts", isOn: $emoteBurstEnabled)
                     VStack(alignment: .leading) {
                         Text("Burst size · \(Int(emoteBurstSize))%")
@@ -1137,6 +1277,13 @@ private struct SettingsView: View {
                     }
                     Button("Delete all stored messages", role: .destructive) { confirmingClear = true }
                         .disabled(liveChat.messages.isEmpty)
+                    Button { exportBackup() } label: {
+                        Label("Export channels and chat data", systemImage: "square.and.arrow.up")
+                    }
+                    Button { showingImporter = true } label: {
+                        Label("Import channels and chat data", systemImage: "square.and.arrow.down")
+                    }
+                    if let importMessage { Text(importMessage).font(.caption).foregroundStyle(NabColors.secondary) }
                 }
                 Section("nabchat+") {
                     if store.isPlus {
@@ -1188,8 +1335,41 @@ private struct SettingsView: View {
             } message: {
                 Text("This cannot be undone.")
             }
+            .sheet(item: $exportDocument) { document in ShareSheet(items: [document.url]) }
+            .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json]) { result in
+                importBackup(result)
+            }
         }
         .navigationViewStyle(.stack)
+    }
+
+    private struct Backup: Codable {
+        let channels: [Channel]
+        let messages: [ChatMessage]
+    }
+
+    private func exportBackup() {
+        let backup = Backup(channels: channels, messages: liveChat.messages)
+        guard let data = try? JSONEncoder().encode(backup) else { return }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("nabchat-backup.json")
+        do {
+            try data.write(to: url, options: .atomic)
+            exportDocument = ExportDocument(url: url)
+        } catch { importMessage = "Could not create backup." }
+    }
+
+    private func importBackup(_ result: Result<URL, Error>) {
+        do {
+            let url = try result.get()
+            guard url.startAccessingSecurityScopedResource() else { throw CocoaError(.fileReadNoPermission) }
+            defer { url.stopAccessingSecurityScopedResource() }
+            let backup = try JSONDecoder().decode(Backup.self, from: Data(contentsOf: url))
+            channels = backup.channels
+            liveChat.replaceHistory(with: backup.messages)
+            importMessage = "Imported \(backup.channels.count) channels and \(backup.messages.count) messages."
+        } catch {
+            importMessage = "That backup could not be imported."
+        }
     }
 
     private func setEnabled(_ requested: Bool, channelID: UUID) {
