@@ -8,12 +8,17 @@ final class AdManager: ObservableObject {
     @Published private(set) var canRequestAds = false
     @Published private(set) var privacyOptionsRequired = false
 
+    private var isConfiguring = false
     private var hasStartedSDK = false
 
     func configure() async {
+        guard !isConfiguring, !hasStartedSDK else { return }
+        isConfiguring = true
+        defer { isConfiguring = false }
+
         do {
             try await ConsentInformation.shared.requestConsentInfoUpdate(with: RequestParameters())
-            try await ConsentForm.loadAndPresentIfRequired(from: nil)
+            try await ConsentForm.loadAndPresentIfRequired(from: Self.presentingViewController)
         } catch {
             // A previous valid consent result can still permit ads when an update fails.
         }
@@ -29,7 +34,7 @@ final class AdManager: ObservableObject {
 
     func presentPrivacyOptions() async {
         do {
-            try await ConsentForm.presentPrivacyOptionsForm(from: nil)
+            try await ConsentForm.presentPrivacyOptionsForm(from: Self.presentingViewController)
             canRequestAds = ConsentInformation.shared.canRequestAds
         } catch {
             // Keep the current consent state when the form is temporarily unavailable.
@@ -41,6 +46,20 @@ final class AdManager: ObservableObject {
         await withCheckedContinuation { continuation in
             ATTrackingManager.requestTrackingAuthorization { _ in continuation.resume() }
         }
+    }
+
+    private static var presentingViewController: UIViewController? {
+        let root = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .rootViewController
+
+        var presented = root
+        while let next = presented?.presentedViewController {
+            presented = next
+        }
+        return presented
     }
 }
 
@@ -62,10 +81,17 @@ private struct BannerViewContainer: UIViewRepresentable {
 #else
         banner.adUnitID = "ca-app-pub-5870784629837288/4364469537"
 #endif
-        banner.rootViewController = nil
-        banner.load(Request())
         return banner
     }
 
-    func updateUIView(_ uiView: BannerView, context: Context) {}
+    func updateUIView(_ uiView: BannerView, context: Context) {
+        guard uiView.rootViewController == nil,
+              let root = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .flatMap(\.windows)
+                .first(where: \.isKeyWindow)?
+                .rootViewController else { return }
+        uiView.rootViewController = root
+        uiView.load(Request())
+    }
 }

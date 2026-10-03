@@ -198,7 +198,13 @@ struct ContentView: View {
             restoreSavedChatters()
             twitchAuth.validateSavedAuthorization()
             refreshProviders()
-            Task { await ads.configure() }
+        }
+        .task {
+            // Let the window and root view controller finish attaching before
+            // UMP presents consent UI or the ads SDK initializes.
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
+            await ads.configure()
         }
         .onChange(of: channels) {
             persistChannels($0)

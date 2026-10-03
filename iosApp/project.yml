@@ -13,9 +13,6 @@ packages:
   GoogleMobileAds:
     url: https://github.com/googleads/swift-package-manager-google-mobile-ads.git
     exactVersion: 13.11.0
-  GoogleUserMessagingPlatform:
-    url: https://github.com/googleads/swift-package-manager-google-user-messaging-platform.git
-    exactVersion: 3.1.0
 
 targets:
   NabchatIOS:
@@ -28,14 +25,12 @@ targets:
         embed: false
       - package: GoogleMobileAds
         product: GoogleMobileAds
-      - package: GoogleUserMessagingPlatform
-        product: GoogleUserMessagingPlatform
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nabchat.app
         PRODUCT_NAME: nabchat
         MARKETING_VERSION: 0.1.0
-        CURRENT_PROJECT_VERSION: 1
+        CURRENT_PROJECT_VERSION: 2
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: nabchat
         INFOPLIST_KEY_GADApplicationIdentifier: ca-app-pub-5870784629837288~9565748760
