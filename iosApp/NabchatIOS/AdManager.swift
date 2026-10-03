@@ -23,7 +23,7 @@ final class AdManager: ObservableObject {
         guard canRequestAds, !hasStartedSDK else { return }
 
         await requestTrackingPermissionIfNeeded()
-        MobileAds.shared.start()
+        await MobileAds.shared.start()
         hasStartedSDK = true
     }
 
