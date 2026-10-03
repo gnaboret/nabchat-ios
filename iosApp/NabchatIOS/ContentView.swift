@@ -278,6 +278,7 @@ struct ContentView: View {
     @State private var burstEmoji: String?
     @State private var burstToken = UUID()
     @State private var isAutoFollowing = true
+    @State private var riverFollowTask: Task<Void, Never>?
     @State private var pendingChatterDeletion: IndexSet?
 
     private var messages: [ChatMessage] {
@@ -682,9 +683,24 @@ struct ContentView: View {
                         if isAutoFollowing, let last = visibleMessages.last { proxy.scrollTo(last.id, anchor: .bottom) }
                     }
                     .onChange(of: visibleMessages.count) { _ in
-                        if isAutoFollowing, let last = visibleMessages.last {
-                            withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(last.id, anchor: .bottom) }
+                        guard isAutoFollowing, riverFollowTask == nil else { return }
+                        riverFollowTask = Task { @MainActor in
+                            // Coalesce rapid chat bursts into one gentle scroll instead
+                            // of interrupting an animation for every network batch.
+                            try? await Task.sleep(nanoseconds: 140_000_000)
+                            guard !Task.isCancelled, isAutoFollowing, let last = visibleMessages.last else {
+                                riverFollowTask = nil
+                                return
+                            }
+                            withAnimation(.easeOut(duration: 0.24)) {
+                                proxy.scrollTo(last.id, anchor: .bottom)
+                            }
+                            riverFollowTask = nil
                         }
+                    }
+                    .onDisappear {
+                        riverFollowTask?.cancel()
+                        riverFollowTask = nil
                     }
                 }
             }
@@ -1179,6 +1195,8 @@ private struct RoomCard: View {
     let messages: [ChatMessage]
     let channelAction: () -> Void
     let messageAction: (ChatMessage) -> Void
+    @State private var isAutoFollowing = true
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button(action: channelAction) { HStack {
@@ -1189,30 +1207,67 @@ private struct RoomCard: View {
                 Text("\(messages.count) MSG").font(.caption2).foregroundStyle(NabColors.secondary)
             }}.buttonStyle(.plain)
             Divider().overlay(NabColors.line)
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(messages) { message in
-                        Button { messageAction(message) } label: {
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack(spacing: 4) {
-                                    Text("@").foregroundStyle(message.channel.platform.color)
-                                    Text(message.username)
-                                    if let badge = message.badge {
-                                        Text(badge.uppercased()).font(.system(size: 9)).foregroundStyle(NabColors.secondary)
+            ScrollViewReader { proxy in
+                ZStack(alignment: .bottomTrailing) {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 10) {
+                            ForEach(messages) { message in
+                                Button { messageAction(message) } label: {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        HStack(spacing: 4) {
+                                            Text("@").foregroundStyle(message.channel.platform.color)
+                                            Text(message.username)
+                                            if let badge = message.badge {
+                                                Text(badge.uppercased()).font(.system(size: 9)).foregroundStyle(NabColors.secondary)
+                                            }
+                                            Spacer()
+                                            Text(message.time).font(.system(size: 10)).foregroundStyle(message.channel.platform.color.opacity(0.78))
+                                        }
+                                        Text(ChatMarkup.readable(message.text))
+                                            .frame(maxWidth: .infinity, alignment: .leading)
                                     }
-                                    Spacer()
-                                    Text(message.time).font(.system(size: 10)).foregroundStyle(message.channel.platform.color.opacity(0.78))
-                                }
-                                Text(ChatMarkup.readable(message.text))
                                     .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 15, design: .serif)).foregroundStyle(NabColors.text).lineLimit(2)
+                                .frame(minHeight: 50, alignment: .top)
+                                .id(message.id)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 15, design: .serif)).foregroundStyle(NabColors.text).lineLimit(2)
-                        .frame(minHeight: 50, alignment: .top)
                     }
+                    .simultaneousGesture(DragGesture().onChanged { _ in isAutoFollowing = false })
+
+                    HStack(spacing: 6) {
+                        Button {
+                            isAutoFollowing = false
+                            if let first = messages.first {
+                                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(first.id, anchor: .top) }
+                            }
+                        } label: {
+                            Image(systemName: "arrow.up.to.line").frame(width: 38, height: 38)
+                        }
+                        Button {
+                            isAutoFollowing = true
+                            if let last = messages.last {
+                                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(last.id, anchor: .bottom) }
+                            }
+                        } label: {
+                            Image(systemName: "arrow.down.to.line").frame(width: 38, height: 38)
+                        }
+                    }
+                    .foregroundStyle(NabColors.text)
+                    .background(NabColors.raised.opacity(0.94), in: Capsule())
+                    .padding(8)
+                }
+                .onAppear {
+                    if let last = messages.last {
+                        DispatchQueue.main.async { proxy.scrollTo(last.id, anchor: .bottom) }
+                    }
+                }
+                .onChange(of: messages.last?.id) { _ in
+                    guard isAutoFollowing, let last = messages.last else { return }
+                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
         }
