@@ -85,6 +85,60 @@ struct ChatMessage: Identifiable, Codable {
     }
 }
 
+private struct ChatEmote: Identifiable {
+    let id: String
+    let name: String
+    var url: URL? { URL(string: "https://files.kick.com/emotes/\(id)/fullsize") }
+}
+
+private enum ChatMarkup {
+    private static let pattern = #"\[emote:(\d+):([^\]]+)\]"#
+
+    static func emotesOnly(in text: String) -> [ChatEmote]? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        let matches = regex.matches(in: text, range: range)
+        guard !matches.isEmpty else { return nil }
+        let remainder = regex.stringByReplacingMatches(in: text, range: range, withTemplate: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard remainder.isEmpty else { return nil }
+        return matches.compactMap { match in
+            guard let idRange = Range(match.range(at: 1), in: text),
+                  let nameRange = Range(match.range(at: 2), in: text) else { return nil }
+            return ChatEmote(id: String(text[idRange]), name: String(text[nameRange]))
+        }
+    }
+
+    static func readable(_ text: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: ":$2:")
+    }
+}
+
+private struct ChatMessageContent: View {
+    let text: String
+    var body: some View {
+        if let emotes = ChatMarkup.emotesOnly(in: text) {
+            HStack(spacing: 4) {
+                ForEach(emotes.prefix(8)) { emote in
+                    AsyncImage(url: emote.url) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFit()
+                        } else {
+                            Text(":\(emote.name):").font(.caption)
+                        }
+                    }
+                    .frame(width: 30, height: 30)
+                    .accessibilityLabel(emote.name)
+                }
+            }
+        } else {
+            Text(ChatMarkup.readable(text))
+        }
+    }
+}
+
 private struct SavedChatter: Identifiable, Codable, Hashable {
     let id: UUID
     let username: String
@@ -218,6 +272,8 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView(channels: $channels, liveChat: liveChat, twitchAuth: twitchAuth, store: store, ads: ads, coreStatus: SharedCoreInfo.shared.status())
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingAddChannel) {
             AddChannelView { channel in
@@ -226,6 +282,8 @@ struct ContentView: View {
                 channels.append(newChannel)
                 selectedChannels = [channel.id]
             }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: $inspectedMessage) { message in
             MessageDetailView(message: message, isSaved: savedChatters.contains { $0.username.caseInsensitiveCompare(message.username) == .orderedSame && $0.platform == message.channel.platform }) {
@@ -404,11 +462,12 @@ struct ContentView: View {
                     } label: {
                         Label(item.rawValue, systemImage: item.icon)
                             .font(.system(size: 12, weight: .semibold, design: .serif))
-                            .frame(maxWidth: .infinity).frame(height: 48)
+                            .frame(maxWidth: .infinity, minHeight: 48, maxHeight: 48)
                             .background(mode == item ? NabColors.raised : Color.clear)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    if item != .rug { Divider().overlay(NabColors.line) }
+                    if item != .rug { Divider().frame(height: 48).overlay(NabColors.line) }
                 }
             }
             .foregroundStyle(NabColors.text)
@@ -422,6 +481,8 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
         }
+        .frame(maxWidth: 820)
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 16).padding(.bottom, 14)
     }
 
@@ -675,6 +736,8 @@ struct ContentView: View {
                     .background(section == item ? NabColors.raised : Color.clear, in: Capsule())
                 Text(item.rawValue).font(.system(size: 10, weight: .medium, design: .serif))
             }
+            .frame(minWidth: 88, minHeight: 52)
+            .contentShape(Rectangle())
             .foregroundStyle(section == item ? NabColors.text : NabColors.secondary)
         }.buttonStyle(.plain)
     }
@@ -709,9 +772,11 @@ private struct MessageRow: View {
                         Text(message.time).font(.system(size: 10)).foregroundStyle(message.channel.platform.color.opacity(0.72))
                     }
                 }
-                Text(message.text).foregroundStyle(NabColors.text)
+                ChatMessageContent(text: message.text).foregroundStyle(NabColors.text)
             }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain).font(.system(size: 16, design: .serif)).padding(.horizontal, 14).padding(.vertical, 11)
     }
@@ -766,7 +831,7 @@ private struct MessageDetailView: View {
                             .font(.caption).foregroundStyle(NabColors.secondary)
                     }
                 }
-                Text(message.text).font(.system(size: 22, design: .serif)).textSelection(.enabled)
+                ChatMessageContent(text: message.text).font(.system(size: 22, design: .serif))
                 HStack {
                     Text(message.time).font(.caption).foregroundStyle(NabColors.secondary)
                     Spacer()
@@ -828,8 +893,11 @@ private struct RoomCard: View {
                 Text("\(messages.count) MSG").font(.caption2).foregroundStyle(NabColors.secondary)
             }}.buttonStyle(.plain)
             ForEach(messages) { message in
-                Text("\(message.username): \(message.text)")
-                    .font(.system(size: 14, design: .serif)).foregroundStyle(NabColors.text).lineLimit(1)
+                HStack(spacing: 4) {
+                    Text("\(message.username):")
+                    ChatMessageContent(text: message.text)
+                }
+                .font(.system(size: 15, design: .serif)).foregroundStyle(NabColors.text).lineLimit(1)
             }
         }.padding(13).background(NabColors.surface, in: RoundedRectangle(cornerRadius: 16))
     }
@@ -850,10 +918,13 @@ private struct RugCard: View {
             }}.buttonStyle(.plain).padding(13)
             HStack(spacing: 9) {
                 ForEach(messages.suffix(3)) { message in
-                    Text("\(message.username): \(message.text)")
+                    HStack(spacing: 3) {
+                        Text("\(message.username):")
+                        ChatMessageContent(text: message.text)
+                    }
                 }
             }
-            .font(.system(size: 13, design: .serif)).foregroundStyle(NabColors.text)
+            .font(.system(size: 15, design: .serif)).foregroundStyle(NabColors.text)
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
             .background(NabColors.raised.opacity(0.65)).clipped()
         }
@@ -1040,28 +1111,6 @@ private struct SettingsView: View {
                             .font(.caption).foregroundStyle(NabColors.secondary)
                     }
                 }
-                Section("nabchat+") {
-                    if store.isPlus {
-                        Label("nabchat+ active", systemImage: "checkmark.seal.fill").foregroundStyle(NabColors.green)
-                        Text("Ads are removed and enabled channels are unlimited.")
-                            .font(.caption).foregroundStyle(NabColors.secondary)
-                    } else {
-                        Button {
-                            Task { await store.purchase() }
-                        } label: {
-                            HStack {
-                                Label("Upgrade to nabchat+", systemImage: "plus.circle.fill")
-                                Spacer()
-                                if store.isLoading { ProgressView() }
-                                else if let product = store.product { Text(product.displayPrice) }
-                            }
-                        }
-                        Button("Restore purchase") { Task { await store.restore() } }
-                    }
-                    if let message = store.message {
-                        Text(message).font(.caption).foregroundStyle(NabColors.secondary)
-                    }
-                }
                 Section("Message Arrival") {
                     Toggle("Start with auto-scroll", isOn: $startWithAutoScroll)
                     Toggle("Keep screen on", isOn: $keepScreenAwake)
@@ -1093,6 +1142,31 @@ private struct SettingsView: View {
                     Button("Delete all stored messages", role: .destructive) { confirmingClear = true }
                         .disabled(liveChat.messages.isEmpty)
                 }
+                Section("nabchat+") {
+                    if store.isPlus {
+                        Label("nabchat+ active", systemImage: "checkmark.seal.fill").foregroundStyle(NabColors.green)
+                        Text("Ads are removed and enabled channels are unlimited.")
+                            .font(.caption).foregroundStyle(NabColors.secondary)
+                    } else {
+                        Button {
+                            Task { await store.purchase() }
+                        } label: {
+                            HStack {
+                                Label("Upgrade to nabchat+", systemImage: "plus.circle.fill")
+                                Spacer()
+                                if store.isLoading { ProgressView() }
+                                else if let product = store.product { Text(product.displayPrice) }
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .contentShape(Rectangle())
+                        }
+                        Button("Restore purchase") { Task { await store.restore() } }
+                            .frame(minHeight: 44)
+                    }
+                    if let message = store.message {
+                        Text(message).font(.caption).foregroundStyle(NabColors.secondary)
+                    }
+                }
                 Section("About") {
                     Text(coreStatus)
                     if ads.privacyOptionsRequired {
@@ -1119,6 +1193,7 @@ private struct SettingsView: View {
                 Text("This cannot be undone.")
             }
         }
+        .navigationViewStyle(.stack)
     }
 
     private func setEnabled(_ requested: Bool, channelID: UUID) {
@@ -1174,7 +1249,7 @@ private struct AddChannelView: View {
         NavigationView {
             VStack(spacing: 22) {
                 Text("Add channel").font(.system(size: 34, design: .serif)).frame(maxWidth: .infinity, alignment: .leading)
-                HStack {
+                HStack(spacing: 12) {
                     platformButton("KICK", .kick); platformButton("TWITCH", .twitch); platformButton("YOUTUBE", .youtube)
                 }
                 TextField("Username/channel", text: $channelName).textFieldStyle(.roundedBorder).disabled(selectedPlatform == nil)
@@ -1192,13 +1267,21 @@ private struct AddChannelView: View {
             .padding(24).background(NabColors.background.ignoresSafeArea())
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }
+        .navigationViewStyle(.stack)
     }
 
     private func platformButton(_ title: String, _ platform: Platform) -> some View {
-        Button(title) { selectedPlatform = platform }
-            .font(.caption.bold()).frame(maxWidth: .infinity, minHeight: 42).foregroundStyle(platform.color)
-            .background(selectedPlatform == platform ? platform.color.opacity(0.2) : Color.clear)
-            .overlay(Capsule().stroke(platform.color, lineWidth: selectedPlatform == platform ? 2 : 1)).clipShape(Capsule())
+        Button { selectedPlatform = platform } label: {
+            Text(title)
+                .font(.caption.bold())
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(platform.color)
+        .background(selectedPlatform == platform ? platform.color.opacity(0.2) : Color.clear)
+        .overlay(Capsule().stroke(platform.color, lineWidth: selectedPlatform == platform ? 2 : 1))
+        .clipShape(Capsule())
     }
 }
 

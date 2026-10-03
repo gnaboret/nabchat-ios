@@ -23,7 +23,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.nabchat.app
         PRODUCT_NAME: nabchat
         MARKETING_VERSION: 0.1.0
-        CURRENT_PROJECT_VERSION: 3
+        CURRENT_PROJECT_VERSION: 4
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: nabchat
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
