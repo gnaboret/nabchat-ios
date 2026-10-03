@@ -15,6 +15,7 @@ struct YouTubeChatSession {
     var continuation: String
     let visitorData: String?
     let videoID: String
+    let channelAvatarURL: String?
 }
 
 struct YouTubePollResult {
@@ -49,7 +50,9 @@ struct YouTubeChatClient: Sendable {
               let liveChat = findObject(initial, keys: ["liveChatContinuation", "liveChatRenderer"]),
               let continuation = findContinuation(liveChat) else { throw YouTubeError.chatUnavailable }
         let visitor = firstMatch(#""VISITOR_DATA":"([^"]+)""#, in: combined) ?? findString(initial, key: "visitorData")
-        return YouTubeChatSession(apiKey: key, clientVersion: version, continuation: continuation, visitorData: visitor, videoID: videoID)
+        let owner = findObject(initial, keys: ["videoOwnerRenderer", "channelThumbnailWithLinkRenderer"])
+        let channelAvatarURL = normalizedURL(thumbnailURL(in: owner))
+        return YouTubeChatSession(apiKey: key, clientVersion: version, continuation: continuation, visitorData: visitor, videoID: videoID, channelAvatarURL: channelAvatarURL)
     }
 
     func poll(_ session: YouTubeChatSession) async throws -> YouTubePollResult {
@@ -86,7 +89,7 @@ struct YouTubeChatClient: Sendable {
         }.joined()
         let badgeKeys = collectBadgeKeys(renderer["authorBadges"])
         let micros = (renderer["timestampUsec"] as? String).flatMap(Double.init) ?? Date().timeIntervalSince1970 * 1_000_000
-        let avatarURL = (((renderer["authorPhoto"] as? [String: Any])?["thumbnails"] as? [[String: Any]])?.last?["url"] as? String)
+        let avatarURL = normalizedURL((((renderer["authorPhoto"] as? [String: Any])?["thumbnails"] as? [[String: Any]])?.last?["url"] as? String))
         return YouTubeRawMessage(id: id, username: author, text: text, badge: badgeKeys.joined(separator: " · ").nilIfEmpty, date: Date(timeIntervalSince1970: micros / 1_000_000), avatarURL: avatarURL)
     }
 
@@ -226,6 +229,29 @@ struct YouTubeChatClient: Sendable {
             for child in array { if let found = findNumber(child, key: key) { return found } }
         }
         return nil
+    }
+
+    private func thumbnailURL(in object: [String: Any]?) -> String? {
+        guard let object else { return nil }
+        if let thumbnails = (object["thumbnail"] as? [String: Any])?["thumbnails"] as? [[String: Any]],
+           let url = thumbnails.last?["url"] as? String { return url }
+        if let thumbnails = object["thumbnails"] as? [[String: Any]],
+           let url = thumbnails.last?["url"] as? String { return url }
+        for child in object.values {
+            if let childObject = child as? [String: Any], let url = thumbnailURL(in: childObject) { return url }
+            if let children = child as? [[String: Any]] {
+                for childObject in children {
+                    if let url = thumbnailURL(in: childObject) { return url }
+                }
+            }
+        }
+        return nil
+    }
+
+    private func normalizedURL(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        if value.hasPrefix("//") { return "https:\(value)" }
+        return value
     }
 
     private func collectRenderers(_ value: Any, result: inout [[String: Any]]) {

@@ -211,13 +211,15 @@ final class LiveChatService: ObservableObject {
                 var successful = false
                 for channel in channels where !Task.isCancelled {
                     do {
-                        let videoID = try await youtubeClient.discoverLiveVideoID(channelInput: channel.name)
-                        guard let videoID else {
-                            sessions.removeValue(forKey: channel.id)
-                            continue
-                        }
                         var session = sessions[channel.id]
-                        if session?.videoID != videoID { session = try await youtubeClient.openSession(videoID: videoID) }
+                        if session == nil {
+                            let videoID = try await youtubeClient.discoverLiveVideoID(channelInput: channel.name)
+                            guard let videoID else { continue }
+                            session = try await youtubeClient.openSession(videoID: videoID)
+                            if let avatarURL = session?.channelAvatarURL {
+                                channelAvatars[channel.id] = avatarURL
+                            }
+                        }
                         guard var activeSession = session else { continue }
                         let result = try await youtubeClient.poll(activeSession)
                         if let continuation = result.continuation { activeSession.continuation = continuation }
