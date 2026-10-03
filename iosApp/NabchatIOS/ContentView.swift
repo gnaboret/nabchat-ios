@@ -304,6 +304,20 @@ struct ContentView: View {
         }
     }
 
+    private var analyticsChannels: [Channel] {
+        selectedChannels.isEmpty ? enabledChannels : enabledChannels.filter { selectedChannels.contains($0.id) }
+    }
+
+    private var analyticsMessages: [ChatMessage] {
+        guard !selectedChannels.isEmpty else { return liveChat.messages }
+        return liveChat.messages.filter { message in
+            analyticsChannels.contains {
+                $0.id == message.channel.id ||
+                ($0.name == message.channel.name && $0.platform == message.channel.platform)
+            }
+        }
+    }
+
     var body: some View {
         ZStack {
             NabColors.background.ignoresSafeArea()
@@ -756,11 +770,13 @@ struct ContentView: View {
     }
 
     private var savedChattersView: some View {
-        Group {
-            if savedChatters.isEmpty {
-                placeholder(title: "Saved Chatters", icon: "person.2")
-            } else {
-                List {
+        VStack(spacing: 0) {
+            sectionTitle("Favorite Chatters")
+            Group {
+                if savedChatters.isEmpty {
+                    placeholder(title: "No Favorite Chatters Yet", icon: "person.2")
+                } else {
+                    List {
                     ForEach($savedChatters) { $chatter in
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
@@ -809,19 +825,22 @@ struct ContentView: View {
                         }
                     }
                 }
-                .listStyle(.plain)
+                    .listStyle(.plain)
+                }
             }
         }
     }
 
     private var analyticsView: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
-                HStack {
-                    metricCard("MESSAGES", value: "\(liveChat.messages.count)", icon: "text.bubble")
-                    metricCard("CHATTERS", value: "\(Set(liveChat.messages.map { $0.username.lowercased() }).count)", icon: "person.2")
-                }
-                ForEach(enabledChannels) { channel in
+        VStack(spacing: 0) {
+            sectionTitle("Analytics")
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    HStack {
+                        metricCard("MESSAGES", value: "\(analyticsMessages.count)", icon: "text.bubble")
+                        metricCard("CHATTERS", value: "\(Set(analyticsMessages.map { $0.username.lowercased() }).count)", icon: "person.2")
+                    }
+                    ForEach(analyticsChannels) { channel in
                     let channelMessages = liveChat.messages.filter { $0.channel.id == channel.id || ($0.channel.name == channel.name && $0.channel.platform == channel.platform) }
                     let unique = Set(channelMessages.map { $0.username.lowercased() }).count
                     VStack(alignment: .leading, spacing: 10) {
@@ -846,9 +865,20 @@ struct ContentView: View {
                         }.frame(height: 6)
                     }
                     .padding(14).background(NabColors.surface, in: RoundedRectangle(cornerRadius: 15))
-                }
-            }.padding(14)
+                    }
+                }.padding(14)
+            }
         }
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 25, weight: .bold, design: .serif))
+            .foregroundStyle(NabColors.text)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(NabColors.background)
     }
 
     private func metricCard(_ title: String, value: String, icon: String) -> some View {
@@ -862,7 +892,7 @@ struct ContentView: View {
     }
 
     private func activityFraction(_ count: Int) -> CGFloat {
-        let maximum = max(1, enabledChannels.map { channel in
+        let maximum = max(1, analyticsChannels.map { channel in
             liveChat.messages.filter { $0.channel.name == channel.name && $0.channel.platform == channel.platform }.count
         }.max() ?? 1)
         return CGFloat(count) / CGFloat(maximum)
