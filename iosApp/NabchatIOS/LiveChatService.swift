@@ -4,6 +4,7 @@ import Foundation
 final class LiveChatService: ObservableObject {
     @Published private(set) var messages: [ChatMessage] = []
     @Published private(set) var isConnected = false
+    @Published private(set) var channelAvatars: [UUID: String] = [:]
 
     private var pollingTask: Task<Void, Never>?
     private var twitchTask: Task<Void, Never>?
@@ -104,6 +105,7 @@ final class LiveChatService: ObservableObject {
             guard let user = (root["data"] as? [[String: Any]])?.first,
                   let id = string(user["id"]) else { continue }
             result[id] = channel
+            if let avatar = string(user["profile_image_url"]) { channelAvatars[channel.id] = avatar }
         }
         return result
     }
@@ -240,6 +242,9 @@ final class LiveChatService: ObservableObject {
         let json = try await requestObject(url)
         guard let value = json["id"] as? NSNumber else { throw LiveChatError.invalidChannel }
         let channelID = value.stringValue
+        if let user = json["user"] as? [String: Any], let avatar = string(user["profile_pic"]) {
+            channelAvatars[channel.id] = avatar
+        }
         channelIDs[channel.id] = channelID
         return channelID
     }

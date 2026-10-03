@@ -66,7 +66,7 @@ final class TwitchAuthService: ObservableObject {
             validateSavedAuthorization()
             return
         }
-        guard pollingTask == nil || pollingTask?.isCancelled == true else { return }
+        pollingTask?.cancel()
         pollingTask = Task {
             do { try await awaitApproval(code) }
             catch is CancellationError { return }

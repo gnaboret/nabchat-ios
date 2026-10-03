@@ -119,6 +119,12 @@ private struct ChatEmote: Identifiable {
     var url: URL? { URL(string: "https://files.kick.com/emotes/\(id)/fullsize") }
 }
 
+private enum ChatPart: Identifiable {
+    case text(String)
+    case emote(ChatEmote)
+    var id: UUID { UUID() }
+}
+
 private enum ChatMarkup {
     private static let pattern = #"\[emote:(\d+):([^\]]+)\]"#
 
@@ -142,6 +148,26 @@ private enum ChatMarkup {
         let range = NSRange(text.startIndex..., in: text)
         return regex.stringByReplacingMatches(in: text, range: range, withTemplate: ":$2:")
     }
+
+
+    static func parts(in text: String) -> [ChatPart] {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [.text(text)] }
+        let fullRange = NSRange(text.startIndex..., in: text)
+        let matches = regex.matches(in: text, range: fullRange)
+        guard !matches.isEmpty else { return [.text(text)] }
+        var parts: [ChatPart] = []
+        var cursor = text.startIndex
+        for match in matches {
+            guard let matchRange = Range(match.range, in: text),
+                  let idRange = Range(match.range(at: 1), in: text),
+                  let nameRange = Range(match.range(at: 2), in: text) else { continue }
+            if cursor < matchRange.lowerBound { parts.append(.text(String(text[cursor..<matchRange.lowerBound]))) }
+            parts.append(.emote(ChatEmote(id: String(text[idRange]), name: String(text[nameRange]))))
+            cursor = matchRange.upperBound
+        }
+        if cursor < text.endIndex { parts.append(.text(String(text[cursor...]))) }
+        return parts
+    }
 }
 
 private struct ChatMessageContent: View {
@@ -159,6 +185,20 @@ private struct ChatMessageContent: View {
                     }
                     .frame(width: 30, height: 30)
                     .accessibilityLabel(emote.name)
+                }
+            }
+        } else if ChatMarkup.parts(in: text).count > 1 {
+            HStack(spacing: 3) {
+                ForEach(ChatMarkup.parts(in: text)) { part in
+                    switch part {
+                    case .text(let value): Text(value)
+                    case .emote(let emote):
+                        AsyncImage(url: emote.url) { phase in
+                            if let image = phase.image { image.resizable().scaledToFit() }
+                            else { Text(":\(emote.name):").font(.caption) }
+                        }
+                        .frame(width: 28, height: 28)
+                    }
                 }
             }
         } else {
@@ -596,6 +636,7 @@ struct ContentView: View {
                             ForEach(enabledChannels) { channel in
                                 RoomCard(
                                     channel: channel,
+                                    avatarURL: liveChat.channelAvatars[channel.id],
                                     messages: displayMessages.filter { $0.channel == channel },
                                     channelAction: { inspectedChannel = channel },
                                     messageAction: { inspectedMessage = $0 }
@@ -615,6 +656,7 @@ struct ContentView: View {
                         ForEach(enabledChannels) { channel in
                             RugCard(
                                 channel: channel,
+                                avatarURL: liveChat.channelAvatars[channel.id],
                                 messages: displayMessages.filter { $0.channel == channel },
                                 channelAction: { inspectedChannel = channel },
                                 messageAction: { inspectedMessage = $0 }
@@ -640,18 +682,26 @@ struct ContentView: View {
     }
 
     private var channelStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                ChannelPill(title: "ALL", initials: nil, color: NabColors.raised, selected: selectedChannels.isEmpty) {
-                    selectedChannels.removeAll()
-                }
-                ForEach(enabledChannels) { channel in
-                    ChannelPill(title: channel.name, initials: channel.shortName, color: channel.platform.color, selected: selectedChannels.contains(channel.id)) {
-                        if selectedChannels.contains(channel.id) { selectedChannels.remove(channel.id) }
-                        else { selectedChannels.insert(channel.id) }
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    if mode == .river {
+                        ChannelPill(title: "ALL", initials: nil, avatarURL: nil, color: NabColors.raised, selected: selectedChannels.isEmpty) {
+                            selectedChannels.removeAll()
+                        }
                     }
-                }
-            }.padding(.horizontal, 14).padding(.vertical, 9)
+                    ForEach(Array((mode == .river ? enabledChannels : Array(repeating: enabledChannels, count: 3).flatMap { $0 }).enumerated()), id: \.offset) { index, channel in
+                        ChannelPill(title: channel.name, initials: channel.shortName, avatarURL: liveChat.channelAvatars[channel.id], color: channel.platform.color, selected: selectedChannels.contains(channel.id)) {
+                            if selectedChannels.contains(channel.id) { selectedChannels.remove(channel.id) }
+                            else { selectedChannels.insert(channel.id) }
+                        }
+                        .id(index)
+                    }
+                }.padding(.horizontal, 14).padding(.vertical, 9)
+            }
+            .onAppear {
+                if mode != .river, !enabledChannels.isEmpty { proxy.scrollTo(enabledChannels.count, anchor: .center) }
+            }
         }
         .overlay(alignment: .top) { Divider().overlay(NabColors.line) }
     }
@@ -952,6 +1002,7 @@ private struct MessageDetailView: View {
 private struct ChannelPill: View {
     let title: String
     let initials: String?
+    let avatarURL: String?
     let color: Color
     let selected: Bool
     let action: () -> Void
@@ -959,12 +1010,11 @@ private struct ChannelPill: View {
         Button(action: action) {
             HStack(spacing: 7) {
                 if let initials = initials {
-                    RoundedRectangle(cornerRadius: 7).fill(color.opacity(0.35)).frame(width: 35, height: 35)
-                        .overlay(Text(initials).font(.system(size: 10, weight: .bold)))
+                    ProfileAvatar(urlString: avatarURL, initials: initials, color: color, size: 48)
                 }
                 Text(title).font(.system(size: 12, weight: .medium, design: .serif)).lineLimit(1)
             }
-            .padding(.horizontal, initials == nil ? 18 : 7).frame(height: 46)
+            .padding(.horizontal, initials == nil ? 18 : 7).frame(height: initials == nil ? 46 : 58)
             .background(selected ? color.opacity(0.32) : NabColors.background)
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? color : NabColors.line, lineWidth: selected ? 2 : 1))
             .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -974,15 +1024,15 @@ private struct ChannelPill: View {
 
 private struct RoomCard: View {
     let channel: Channel
+    let avatarURL: String?
     let messages: [ChatMessage]
     let channelAction: () -> Void
     let messageAction: (ChatMessage) -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button(action: channelAction) { HStack {
-                Circle().fill(channel.platform.color.opacity(0.3)).frame(width: 36, height: 36)
-                    .overlay(Text(channel.shortName).font(.caption.bold()))
-                Text(channel.name).font(.system(size: 19, design: .serif)).foregroundStyle(channel.platform.color)
+                ProfileAvatar(urlString: avatarURL, initials: channel.shortName, color: channel.platform.color, size: 54)
+                Text(channel.name).font(.system(size: 24, weight: .semibold, design: .serif)).foregroundStyle(channel.platform.color)
                 Spacer()
                 Image(systemName: "link").foregroundStyle(channel.platform.color)
                 Text("\(messages.count) MSG").font(.caption2).foregroundStyle(NabColors.secondary)
@@ -993,16 +1043,16 @@ private struct RoomCard: View {
                     ForEach(messages) { message in
                         Button { messageAction(message) } label: {
                             HStack(alignment: .top, spacing: 4) {
-                                ProfileAvatar(urlString: message.avatarURL, initials: String(message.username.prefix(2)).uppercased(), color: message.channel.platform.color, size: 28)
                                 Text("@").foregroundStyle(message.channel.platform.color)
                                 Text("\(message.username):")
-                                ChatMessageContent(text: message.text)
+                                Text(ChatMarkup.readable(message.text))
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .font(.system(size: 15, design: .serif)).foregroundStyle(NabColors.text)
+                        .font(.system(size: 15, design: .serif)).foregroundStyle(NabColors.text).lineLimit(2)
+                        .frame(height: 42, alignment: .top)
                     }
                 }
             }
@@ -1014,12 +1064,14 @@ private struct RoomCard: View {
 
 private struct RugCard: View {
     let channel: Channel
+    let avatarURL: String?
     let messages: [ChatMessage]
     let channelAction: () -> Void
     let messageAction: (ChatMessage) -> Void
     var body: some View {
         VStack(spacing: 0) {
             Button(action: channelAction) { HStack {
+                ProfileAvatar(urlString: avatarURL, initials: channel.shortName, color: channel.platform.color, size: 46)
                 Text(channel.name).font(.system(size: 19, design: .serif)).foregroundStyle(channel.platform.color)
                 Spacer()
                 Text("\(Set(messages.map { $0.username.lowercased() }).count) CHATTERS · \(ChatRate.messagesPerMinute(messages))/MIN")
@@ -1030,7 +1082,6 @@ private struct RugCard: View {
                 ForEach(messages.suffix(3)) { message in
                     Button { messageAction(message) } label: {
                         HStack(spacing: 4) {
-                            ProfileAvatar(urlString: message.avatarURL, initials: String(message.username.prefix(2)).uppercased(), color: message.channel.platform.color, size: 28)
                             Text("@").foregroundStyle(message.channel.platform.color)
                             Text("\(message.username):")
                             ChatMessageContent(text: message.text)
@@ -1038,6 +1089,8 @@ private struct RugCard: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, minHeight: 54, maxHeight: 54, alignment: .topLeading)
+                    .clipped()
                 }
             }
             .font(.system(size: 15, design: .serif)).foregroundStyle(NabColors.text)
