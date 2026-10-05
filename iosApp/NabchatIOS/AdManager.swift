@@ -48,11 +48,12 @@ struct NabchatBannerAd: View {
 private struct BannerViewContainer: UIViewRepresentable {
     func makeUIView(context: Context) -> GADBannerView {
         let banner = GADBannerView(adSize: GADAdSizeBanner)
-#if DEBUG
-        banner.adUnitID = "ca-app-pub-3940256099942544/2435281174"
-#else
-        banner.adUnitID = "ca-app-pub-5870784629837288/4364469537"
-#endif
+        // TestFlight receipts are sandbox receipts even though the archive uses
+        // the Release configuration. Keep TestFlight traffic on Google's test
+        // unit; public App Store installs automatically use the live unit.
+        banner.adUnitID = isTestEnvironment
+            ? "ca-app-pub-3940256099942544/2435281174"
+            : "ca-app-pub-5870784629837288/4364469537"
         return banner
     }
 
@@ -65,5 +66,13 @@ private struct BannerViewContainer: UIViewRepresentable {
                 .rootViewController else { return }
         banner.rootViewController = root
         banner.load(GADRequest())
+    }
+
+    private var isTestEnvironment: Bool {
+#if DEBUG
+        return true
+#else
+        return Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt"
+#endif
     }
 }
