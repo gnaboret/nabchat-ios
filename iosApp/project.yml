@@ -20,6 +20,17 @@ targets:
     platform: iOS
     info:
       path: NabchatIOS/Info.plist
+      properties:
+        CFBundleDisplayName: nabchat
+        GADApplicationIdentifier: ca-app-pub-5870784629837288~9565748760
+        ITSAppUsesNonExemptEncryption: false
+        NSUserTrackingUsageDescription: "This helps keep nabchat free by measuring ad performance and showing relevant ads."
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
     sources:
       - path: NabchatIOS
     dependencies:
