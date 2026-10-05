@@ -61,6 +61,18 @@ jobs:
           ARCHS=arm64
           CODE_SIGNING_ALLOWED=NO
           build
+      - name: Symbolicate ads startup crash offsets
+        working-directory: iosApp
+        run: |
+          DWARF="build/device/Build/Products/Release-iphoneos/nabchat.app.dSYM/Contents/Resources/DWARF/nabchat"
+          if [ -f "$DWARF" ]; then
+            echo "Build 20 exception and file-attribute frames:"
+            xcrun atos -arch arm64 -o "$DWARF" -l 0x0 \
+              0x25550c 0x255688 0x2718dc 0x2715cc 0x2714a8 0x255eec
+          else
+            echo "dSYM not found at $DWARF"
+            find build/device -name '*.dSYM' -print
+          fi
       - name: Upload unsigned simulator build
         uses: actions/upload-artifact@v4
         with:
