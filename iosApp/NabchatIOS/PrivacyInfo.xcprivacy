@@ -5,7 +5,12 @@
     <key>NSPrivacyTracking</key>
     <true/>
     <key>NSPrivacyTrackingDomains</key>
-    <array/>
+    <array>
+        <string>googleads.g.doubleclick.net</string>
+        <string>pubads.g.doubleclick.net</string>
+        <string>g.doubleclick.net</string>
+        <string>securepubads.g.doubleclick.net</string>
+    </array>
     <key>NSPrivacyCollectedDataTypes</key>
     <array/>
     <key>NSPrivacyAccessedAPITypes</key>

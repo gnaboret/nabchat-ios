@@ -75,11 +75,14 @@ jobs:
           ACTUAL_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PLIST")"
           ACTUAL_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PLIST")"
           TRACKING="$(/usr/libexec/PlistBuddy -c 'Print :NSPrivacyTracking' "$PRIVACY_MANIFEST")"
+          TRACKING_DOMAIN="$(/usr/libexec/PlistBuddy -c 'Print :NSPrivacyTrackingDomains:0' "$PRIVACY_MANIFEST")"
           echo "Packaged app version: $ACTUAL_VERSION ($ACTUAL_BUILD)"
           echo "Packaged privacy tracking declaration: $TRACKING"
+          echo "First packaged tracking domain: $TRACKING_DOMAIN"
           test "$ACTUAL_VERSION" = "1.0"
           test "$ACTUAL_BUILD" = "$EXPECTED_BUILD"
           test "$TRACKING" = "true"
+          test -n "$TRACKING_DOMAIN"
       - name: Prepare App Store Connect key and export options
         env:
           API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
