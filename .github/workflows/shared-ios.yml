@@ -67,8 +67,8 @@ jobs:
           DWARF="build/device/Build/Products/Release-iphoneos/nabchat.app.dSYM/Contents/Resources/DWARF/nabchat"
           if [ -f "$DWARF" ]; then
             echo "Build 20 exception and file-attribute frames:"
-            xcrun atos -arch arm64 -o "$DWARF" -l 0x0 \
-              0x25550c 0x255688 0x2718dc 0x2715cc 0x2714a8 0x255eec
+            xcrun atos -arch arm64 -o "$DWARF" -l 0x100000000 \
+              0x10025550c 0x100255688 0x1002718dc 0x1002715cc 0x1002714a8 0x100255eec
           else
             echo "dSYM not found at $DWARF"
             find build/device -name '*.dSYM' -print
