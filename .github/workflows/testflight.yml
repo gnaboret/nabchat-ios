@@ -66,6 +66,20 @@ jobs:
           CODE_SIGN_STYLE=Manual
           CODE_SIGN_IDENTITY="Apple Distribution"
           PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME"
+      - name: Verify packaged release metadata
+        env:
+          EXPECTED_BUILD: ${{ inputs.build_number }}
+        run: |
+          APP_PLIST="$RUNNER_TEMP/nabchat.xcarchive/Products/Applications/nabchat.app/Info.plist"
+          PRIVACY_MANIFEST="$RUNNER_TEMP/nabchat.xcarchive/Products/Applications/nabchat.app/PrivacyInfo.xcprivacy"
+          ACTUAL_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PLIST")"
+          ACTUAL_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PLIST")"
+          TRACKING="$(/usr/libexec/PlistBuddy -c 'Print :NSPrivacyTracking' "$PRIVACY_MANIFEST")"
+          echo "Packaged app version: $ACTUAL_VERSION ($ACTUAL_BUILD)"
+          echo "Packaged privacy tracking declaration: $TRACKING"
+          test "$ACTUAL_VERSION" = "1.0"
+          test "$ACTUAL_BUILD" = "$EXPECTED_BUILD"
+          test "$TRACKING" = "true"
       - name: Prepare App Store Connect key and export options
         env:
           API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
