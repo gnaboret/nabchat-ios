@@ -1,7 +1,6 @@
 import AppTrackingTransparency
 import GoogleMobileAds
 import SwiftUI
-import UserMessagingPlatform
 
 @MainActor
 final class AdManager: ObservableObject {
@@ -16,29 +15,15 @@ final class AdManager: ObservableObject {
         isConfiguring = true
         defer { isConfiguring = false }
 
-        do {
-            try await UMPConsentInformation.sharedInstance.requestConsentInfoUpdate(with: UMPRequestParameters())
-            try await UMPConsentForm.loadAndPresentIfRequired(from: Self.presentingViewController)
-        } catch {
-            // A previous consent decision can still permit an ad request.
-        }
-
-        privacyOptionsRequired = UMPConsentInformation.sharedInstance.privacyOptionsRequirementStatus == .required
-        canRequestAds = UMPConsentInformation.sharedInstance.canRequestAds
-        guard canRequestAds, !hasStartedSDK else { return }
-
         await requestTrackingPermissionIfNeeded()
         await GADMobileAds.sharedInstance().start()
         hasStartedSDK = true
+        canRequestAds = true
     }
 
     func presentPrivacyOptions() async {
-        do {
-            try await UMPConsentForm.presentPrivacyOptionsForm(from: Self.presentingViewController)
-            canRequestAds = UMPConsentInformation.sharedInstance.canRequestAds
-        } catch {
-            // Keep the current consent state if the form is unavailable.
-        }
+        // Consent UI is temporarily unavailable while Google's UMP component is
+        // isolated from a pre-launch crash on iPadOS 26.4.
     }
 
     private func requestTrackingPermissionIfNeeded() async {
@@ -48,16 +33,6 @@ final class AdManager: ObservableObject {
         }
     }
 
-    private static var presentingViewController: UIViewController? {
-        let root = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first(where: \.isKeyWindow)?
-            .rootViewController
-        var presented = root
-        while let next = presented?.presentedViewController { presented = next }
-        return presented
-    }
 }
 
 struct NabchatBannerAd: View {
