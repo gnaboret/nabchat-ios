@@ -30,7 +30,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.nabchat.app
         PRODUCT_NAME: nabchat
         MARKETING_VERSION: 0.1.0
-        CURRENT_PROJECT_VERSION: 18
+        CURRENT_PROJECT_VERSION: 19
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: nabchat
         INFOPLIST_KEY_GADApplicationIdentifier: ca-app-pub-5870784629837288~9565748760
@@ -42,7 +42,6 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"
         IPHONEOS_DEPLOYMENT_TARGET: "15.0"
-        OTHER_LDFLAGS: "$(inherited) -ObjC"
 
 schemes:
   NabchatIOS:
