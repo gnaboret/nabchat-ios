@@ -94,6 +94,7 @@ jobs:
           <plist version="1.0"><dict>
           <key>method</key><string>app-store-connect</string>
           <key>destination</key><string>upload</string>
+          <key>manageAppVersionAndBuildNumber</key><false/>
           <key>signingStyle</key><string>manual</string>
           <key>teamID</key><string>$TEAM_ID</string>
           <key>provisioningProfiles</key><dict><key>com.nabchat.app</key><string>$PROFILE_NAME</string></dict>

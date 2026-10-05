@@ -22,6 +22,8 @@ targets:
       path: NabchatIOS/Info.plist
       properties:
         CFBundleDisplayName: nabchat
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         GADApplicationIdentifier: ca-app-pub-5870784629837288~9565748760
         ITSAppUsesNonExemptEncryption: false
         NSUserTrackingUsageDescription: "This helps keep nabchat free by measuring ad performance and showing relevant ads."
