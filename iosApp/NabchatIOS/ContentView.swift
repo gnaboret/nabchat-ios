@@ -1656,7 +1656,7 @@ private struct SettingsView: View {
                                 } else if let product = store.product {
                                     Text(product.displayPrice)
                                 } else {
-                                    Text("Load price")
+                                    Text("Check price")
                                         .foregroundStyle(NabColors.secondary)
                                 }
                             }

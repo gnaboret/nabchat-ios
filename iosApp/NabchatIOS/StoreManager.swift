@@ -13,108 +13,134 @@ final class StoreManager: ObservableObject {
     private var transactionUpdates: Task<Void, Never>?
 
     init() {
-        transactionUpdates = Task { [weak self] in
-            for await update in Transaction.updates {
-                guard let self else { return }
-                if case .verified(let transaction) = update {
-                    await transaction.finish()
-                    await self.refreshEntitlements()
-                }
-            }
-        }
-        Task { await prepare() }
+        transactionUpdates = observeTransactions()
+        Task { await refresh() }
     }
 
-    deinit { transactionUpdates?.cancel() }
+    deinit {
+        transactionUpdates?.cancel()
+    }
 
-    func prepare() async {
+    /// Loads the product Apple currently exposes for this app and storefront,
+    /// then reconciles the user's non-consumable entitlement.
+    func refresh() async {
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
 
-        product = await loadProduct()
-        await refreshEntitlements()
-
-        if product == nil {
-            message = "nabchat+ is temporarily unavailable. Check your connection, then tap Reload."
-        } else if message?.contains("temporarily unavailable") == true {
+        await refreshEntitlement()
+        do {
+            product = try await fetchPlusProduct()
             message = nil
+        } catch {
+            product = nil
+            message = purchaseAvailabilityMessage
         }
     }
 
+    /// Always performs a fresh App Store lookup before purchasing. This avoids
+    /// relying on product metadata cached during app launch or a prior storefront.
     func purchase() async {
-        message = nil
-        if product == nil {
-            await prepare()
-        }
-        guard let product else {
-            message = "Apple did not return nabchat+ for this storefront. Please try again shortly."
-            return
-        }
+        guard !isLoading else { return }
         isLoading = true
+        message = nil
         defer { isLoading = false }
+
         do {
-            switch try await product.purchase() {
+            let currentProduct = try await fetchPlusProduct()
+            product = currentProduct
+
+            switch try await currentProduct.purchase() {
             case .success(let verification):
-                guard case .verified(let transaction) = verification else {
-                    message = "The purchase could not be verified."
-                    return
-                }
+                let transaction = try verified(verification)
                 await transaction.finish()
-                await refreshEntitlements()
+                await refreshEntitlement()
+                message = isPlus ? "nabchat+ is active." : "The purchase completed, but the entitlement has not refreshed yet."
+
             case .pending:
-                message = "The purchase is awaiting approval."
+                message = "The purchase is pending approval."
+
             case .userCancelled:
                 break
+
             @unknown default:
-                break
+                message = "The App Store returned an unknown purchase result."
             }
+        } catch StoreError.productUnavailable {
+            product = nil
+            message = purchaseAvailabilityMessage
+        } catch StoreError.failedVerification {
+            message = "Apple completed the purchase, but its signature could not be verified."
         } catch {
-            message = "The purchase could not be completed."
+            message = "The App Store could not complete the purchase: \(error.localizedDescription)"
         }
     }
 
     func restore() async {
-        message = nil
+        guard !isLoading else { return }
         isLoading = true
+        message = nil
         defer { isLoading = false }
+
         do {
             try await AppStore.sync()
-            await refreshEntitlements()
-            message = isPlus ? "nabchat+ restored." : "No nabchat+ purchase was found for this Apple ID."
+            await refreshEntitlement()
+            message = isPlus
+                ? "nabchat+ restored."
+                : "No nabchat+ purchase was found for this Apple Account."
         } catch {
-            message = "Purchases could not be restored."
+            message = "The App Store could not restore purchases: \(error.localizedDescription)"
         }
     }
 
-    private func refreshEntitlements() async {
-        var entitled = false
+    private func fetchPlusProduct() async throws -> Product {
+        let products = try await Product.products(for: [Self.plusProductID])
+        guard let product = products.first(where: { $0.id == Self.plusProductID }) else {
+            throw StoreError.productUnavailable
+        }
+        return product
+    }
+
+    private func refreshEntitlement() async {
+        var hasPlus = false
+
         for await result in Transaction.currentEntitlements {
-            guard case .verified(let transaction) = result,
+            guard let transaction = try? verified(result),
                   transaction.productID == Self.plusProductID,
                   transaction.revocationDate == nil else { continue }
-            entitled = true
+            hasPlus = true
+            break
         }
-        isPlus = entitled
+
+        isPlus = hasPlus
     }
 
-    /// App Store product metadata can briefly be unavailable immediately after
-    /// launch or a storefront refresh. Retry before presenting an unavailable
-    /// purchase state so App Review and customers get a resilient purchase flow.
-    private func loadProduct() async -> Product? {
-        for attempt in 0..<3 {
-            do {
-                if let product = try await Product.products(for: [Self.plusProductID]).first {
-                    return product
-                }
-            } catch {
-                // A later attempt may succeed after StoreKit refreshes its state.
-            }
-
-            if attempt < 2 {
-                try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 750_000_000)
+    private func observeTransactions() -> Task<Void, Never> {
+        Task { [weak self] in
+            for await result in Transaction.updates {
+                guard let self else { return }
+                guard let transaction = try? self.verified(result) else { continue }
+                await transaction.finish()
+                await self.refreshEntitlement()
             }
         }
-        return nil
+    }
+
+    private func verified<T>(_ result: VerificationResult<T>) throws -> T {
+        switch result {
+        case .verified(let value):
+            return value
+        case .unverified:
+            throw StoreError.failedVerification
+        }
+    }
+
+    private var purchaseAvailabilityMessage: String {
+        "Apple is not currently offering nabchat+ to this App Store account. Confirm that the Paid Apps Agreement is Active, then try again."
+    }
+
+    private enum StoreError: Error {
+        case productUnavailable
+        case failedVerification
     }
 }
