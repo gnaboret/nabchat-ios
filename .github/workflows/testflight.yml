@@ -10,7 +10,9 @@ on:
 
 jobs:
   upload-testflight:
-    runs-on: macos-26
+    # GitHub's Xcode 27 preview image includes the iOS 27.1 SDK and the
+    # iPhone Duo simulator. The ordinary macOS 26 image stops at Xcode 26.6.
+    runs-on: xcode-27
     steps:
       - name: Check out source
         uses: actions/checkout@v5
