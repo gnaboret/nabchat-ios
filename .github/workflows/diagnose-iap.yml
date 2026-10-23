@@ -1,0 +1,53 @@
+name: Diagnose nabchat in-app purchase
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose-iap:
+    runs-on: xcode-27
+    steps:
+      - name: Prepare App Store Connect credentials
+        env:
+          API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+        run: |
+          echo "$API_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey_$API_KEY_ID.p8"
+
+      - name: Inspect nabchat+ configuration
+        env:
+          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          TOKEN="$(ruby -r spaceship -e 'token = Spaceship::ConnectAPI::Token.create(key_id: ENV.fetch("API_KEY_ID"), issuer_id: ENV.fetch("API_ISSUER_ID"), filepath: File.join(ENV.fetch("RUNNER_TEMP"), "AuthKey_#{ENV.fetch("API_KEY_ID")}.p8")); print token.text')"
+
+          APP_RESPONSE="$(curl --fail-with-body --silent --show-error \
+            --header "Authorization: Bearer $TOKEN" \
+            'https://api.appstoreconnect.apple.com/v1/apps?filter%5BbundleId%5D=com.nabchat.app')"
+          APP_ID="$(jq -er '.data | if length == 1 then .[0].id else error("Expected exactly one com.nabchat.app record") end' <<<"$APP_RESPONSE")"
+
+          IAP_RESPONSE="$(curl --fail-with-body --silent --show-error \
+            --header "Authorization: Bearer $TOKEN" \
+            "https://api.appstoreconnect.apple.com/v1/apps/$APP_ID/inAppPurchasesV2?filter%5BproductId%5D=nabchat_plus&include=iapPriceSchedule,inAppPurchaseAvailability")"
+
+          jq '{products: [.data[] | {id, attributes}], included: [.included[]? | {type, id, attributes}]}' <<<"$IAP_RESPONSE"
+
+          PRODUCT_COUNT="$(jq '.data | length' <<<"$IAP_RESPONSE")"
+          PRODUCT_ID="$(jq -r '.data[0].attributes.productId // empty' <<<"$IAP_RESPONSE")"
+          PRODUCT_TYPE="$(jq -r '.data[0].attributes.inAppPurchaseType // empty' <<<"$IAP_RESPONSE")"
+          PRODUCT_STATE="$(jq -r '.data[0].attributes.state // empty' <<<"$IAP_RESPONSE")"
+          CLEARED_FOR_SALE="$(jq -r '.data[0].attributes.clearedForSaleForAllTerritories // empty' <<<"$IAP_RESPONSE")"
+
+          test "$PRODUCT_COUNT" = "1"
+          test "$PRODUCT_ID" = "nabchat_plus"
+          test "$PRODUCT_TYPE" = "NON_CONSUMABLE"
+          test "$CLEARED_FOR_SALE" = "true"
+          case "$PRODUCT_STATE" in
+            READY_TO_SUBMIT|WAITING_FOR_REVIEW|IN_REVIEW|PENDING_BINARY_APPROVAL|APPROVED) ;;
+            *) echo "Invalid nabchat+ state: $PRODUCT_STATE"; exit 1 ;;
+          esac
+
+          PRICE_SCHEDULE_COUNT="$(jq '[.included[]? | select(.type == "inAppPurchasePriceSchedules")] | length' <<<"$IAP_RESPONSE")"
+          test "$PRICE_SCHEDULE_COUNT" -ge 1
+
+          echo "nabchat+ App Store configuration is structurally valid."
