@@ -1645,35 +1645,28 @@ private struct SettingsView: View {
                         Text("Ads are removed and enabled channels are unlimited.")
                             .font(.caption).foregroundStyle(NabColors.secondary)
                     } else {
-                        if store.product != nil {
-                            Button {
-                                Task { await store.purchase() }
-                            } label: {
-                                HStack {
-                                    Label("Upgrade to nabchat+", systemImage: "plus.circle.fill")
-                                    Spacer()
-                                    if store.isLoading { ProgressView() }
-                                    else if let product = store.product { Text(product.displayPrice) }
+                        Button {
+                            Task { await store.purchase() }
+                        } label: {
+                            HStack {
+                                Label("Buy nabchat+", systemImage: "plus.circle.fill")
+                                Spacer()
+                                if store.isLoading {
+                                    ProgressView()
+                                } else if let product = store.product {
+                                    Text(product.displayPrice)
+                                } else {
+                                    Text("Load price")
+                                        .foregroundStyle(NabColors.secondary)
                                 }
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                                .contentShape(Rectangle())
                             }
-                        } else {
-                            Button {
-                                Task { await store.prepare() }
-                            } label: {
-                                HStack {
-                                    Label(store.isLoading ? "Loading nabchat+…" : "Reload nabchat+", systemImage: "arrow.clockwise")
-                                    Spacer()
-                                    if store.isLoading { ProgressView() }
-                                }
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                                .contentShape(Rectangle())
-                            }
-                            .disabled(store.isLoading)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .contentShape(Rectangle())
                         }
+                        .disabled(store.isLoading)
                         Button("Restore purchase") { Task { await store.restore() } }
                             .frame(minHeight: 44)
+                            .disabled(store.isLoading)
                     }
                     if let message = store.message {
                         Text(message).font(.caption).foregroundStyle(NabColors.secondary)

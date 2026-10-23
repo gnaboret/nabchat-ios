@@ -43,10 +43,14 @@ final class StoreManager: ObservableObject {
     }
 
     func purchase() async {
+        message = nil
         if product == nil {
             await prepare()
         }
-        guard let product else { return }
+        guard let product else {
+            message = "Apple did not return nabchat+ for this storefront. Please try again shortly."
+            return
+        }
         isLoading = true
         defer { isLoading = false }
         do {
@@ -71,6 +75,7 @@ final class StoreManager: ObservableObject {
     }
 
     func restore() async {
+        message = nil
         isLoading = true
         defer { isLoading = false }
         do {
