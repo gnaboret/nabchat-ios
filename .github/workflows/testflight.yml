@@ -21,6 +21,10 @@ jobs:
           java-version: "17"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v5
+      - name: Select Xcode 27.1 for iPhone Duo support
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "27.1"
       - name: Build physical-device framework
         run: |
           chmod +x gradlew
@@ -33,6 +37,10 @@ jobs:
       - name: Generate Xcode project
         working-directory: iosApp
         run: xcodegen generate
+      - name: Verify iPhone Duo SDK toolchain
+        run: |
+          xcodebuild -version
+          xcrun simctl list devicetypes | grep -F "iPhone Duo"
       - name: Install signing identity and profile
         env:
           CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}

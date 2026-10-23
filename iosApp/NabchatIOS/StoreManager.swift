@@ -28,22 +28,25 @@ final class StoreManager: ObservableObject {
     deinit { transactionUpdates?.cancel() }
 
     func prepare() async {
+        guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
-        do {
-            product = try await Product.products(for: [Self.plusProductID]).first
-            await refreshEntitlements()
-        } catch {
-            message = "The App Store could not load nabchat+ yet."
+
+        product = await loadProduct()
+        await refreshEntitlements()
+
+        if product == nil {
+            message = "nabchat+ is temporarily unavailable. Check your connection, then tap Reload."
+        } else if message?.contains("temporarily unavailable") == true {
+            message = nil
         }
     }
 
     func purchase() async {
-        guard let product else {
+        if product == nil {
             await prepare()
-            if self.product == nil { message = "nabchat+ is not available from the App Store yet." }
-            return
         }
+        guard let product else { return }
         isLoading = true
         defer { isLoading = false }
         do {
@@ -88,5 +91,25 @@ final class StoreManager: ObservableObject {
             entitled = true
         }
         isPlus = entitled
+    }
+
+    /// App Store product metadata can briefly be unavailable immediately after
+    /// launch or a storefront refresh. Retry before presenting an unavailable
+    /// purchase state so App Review and customers get a resilient purchase flow.
+    private func loadProduct() async -> Product? {
+        for attempt in 0..<3 {
+            do {
+                if let product = try await Product.products(for: [Self.plusProductID]).first {
+                    return product
+                }
+            } catch {
+                // A later attempt may succeed after StoreKit refreshes its state.
+            }
+
+            if attempt < 2 {
+                try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 750_000_000)
+            }
+        }
+        return nil
     }
 }
