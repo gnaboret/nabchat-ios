@@ -7,8 +7,12 @@ final class StoreManager: ObservableObject {
 
     @Published private(set) var product: Product?
     @Published private(set) var isPlus = false
-    @Published private(set) var isLoading = false
+    @Published private(set) var isLoadingProduct = false
+    @Published private(set) var isPurchasing = false
+    @Published private(set) var isRestoring = false
     @Published var message: String?
+
+    var isBusy: Bool { isPurchasing || isRestoring }
 
     private var transactionUpdates: Task<Void, Never>?
 
@@ -24,11 +28,10 @@ final class StoreManager: ObservableObject {
     /// Loads the product Apple currently exposes for this app and storefront,
     /// then reconciles the user's non-consumable entitlement.
     func refresh() async {
-        guard !isLoading else { return }
-        isLoading = true
-        defer { isLoading = false }
+        guard !isLoadingProduct else { return }
+        isLoadingProduct = true
+        defer { isLoadingProduct = false }
 
-        await refreshEntitlement()
         do {
             product = try await fetchPlusProduct()
             message = nil
@@ -36,15 +39,16 @@ final class StoreManager: ObservableObject {
             product = nil
             message = purchaseAvailabilityMessage
         }
+        await refreshEntitlement()
     }
 
     /// Always performs a fresh App Store lookup before purchasing. This avoids
     /// relying on product metadata cached during app launch or a prior storefront.
     func purchase() async {
-        guard !isLoading else { return }
-        isLoading = true
+        guard !isBusy else { return }
+        isPurchasing = true
         message = nil
-        defer { isLoading = false }
+        defer { isPurchasing = false }
 
         do {
             let currentProduct = try await fetchPlusProduct()
@@ -77,10 +81,10 @@ final class StoreManager: ObservableObject {
     }
 
     func restore() async {
-        guard !isLoading else { return }
-        isLoading = true
+        guard !isBusy else { return }
+        isRestoring = true
         message = nil
-        defer { isLoading = false }
+        defer { isRestoring = false }
 
         do {
             try await AppStore.sync()

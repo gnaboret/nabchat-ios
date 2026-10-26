@@ -1651,10 +1651,13 @@ private struct SettingsView: View {
                             HStack {
                                 Label("Buy nabchat+", systemImage: "plus.circle.fill")
                                 Spacer()
-                                if store.isLoading {
+                                if store.isPurchasing {
                                     ProgressView()
                                 } else if let product = store.product {
                                     Text(product.displayPrice)
+                                } else if store.isLoadingProduct {
+                                    Text("Loading price…")
+                                        .foregroundStyle(NabColors.secondary)
                                 } else {
                                     Text("Check price")
                                         .foregroundStyle(NabColors.secondary)
@@ -1663,10 +1666,17 @@ private struct SettingsView: View {
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .contentShape(Rectangle())
                         }
-                        .disabled(store.isLoading)
-                        Button("Restore purchase") { Task { await store.restore() } }
+                        .disabled(store.isBusy)
+                        Button {
+                            Task { await store.restore() }
+                        } label: {
+                            HStack {
+                                Text("Restore purchase")
+                                if store.isRestoring { ProgressView() }
+                            }
                             .frame(minHeight: 44)
-                            .disabled(store.isLoading)
+                        }
+                        .disabled(store.isBusy)
                     }
                     if let message = store.message {
                         Text(message).font(.caption).foregroundStyle(NabColors.secondary)
