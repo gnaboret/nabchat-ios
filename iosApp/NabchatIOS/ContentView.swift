@@ -1658,9 +1658,6 @@ private struct SettingsView: View {
                                 } else if store.isLoadingProduct {
                                     Text("Loading price…")
                                         .foregroundStyle(NabColors.secondary)
-                                } else {
-                                    Text("Check price")
-                                        .foregroundStyle(NabColors.secondary)
                                 }
                             }
                             .frame(maxWidth: .infinity, minHeight: 44)

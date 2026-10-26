@@ -140,7 +140,7 @@ final class StoreManager: ObservableObject {
     }
 
     private var purchaseAvailabilityMessage: String {
-        "Apple is not currently offering nabchat+ to this App Store account. Confirm that the Paid Apps Agreement is Active, then try again."
+        "nabchat+ is not available from Apple right now. TestFlight uses Apple's sandbox automatically; no separate tester purchase is required. Confirm the Paid Apps Agreement is Active and that nabchat+ is included with this app version in App Store Connect."
     }
 
     private enum StoreError: Error {
