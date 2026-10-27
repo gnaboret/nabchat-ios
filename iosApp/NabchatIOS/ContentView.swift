@@ -1653,11 +1653,6 @@ private struct SettingsView: View {
                                 Spacer()
                                 if store.isPurchasing {
                                     ProgressView()
-                                } else if let product = store.product {
-                                    Text(product.displayPrice)
-                                } else if store.isLoadingProduct {
-                                    Text("Loading price…")
-                                        .foregroundStyle(NabColors.secondary)
                                 }
                             }
                             .frame(maxWidth: .infinity, minHeight: 44)
