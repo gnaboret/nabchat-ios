@@ -33,9 +33,10 @@ jobs:
       - name: Capture native Duo screenshots
         run: |
           DEVICE_TYPE="$(xcrun simctl list devicetypes | awk -F '[()]' '/iPhone Duo \(/ {print $2; exit}')"
-          RUNTIME="$(xcrun simctl list runtimes | awk '/iOS 27/ {print $NF; exit}')"
+          RUNTIME="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(runtime for runtime, devices in d["devices"].items() if any(device["name"] == "iPhone Duo" for device in devices)))')"
           test -n "$DEVICE_TYPE"
           test -n "$RUNTIME"
+          echo "Creating $DEVICE_TYPE on $RUNTIME"
           UDID="$(xcrun simctl create Nabchat-Duo-Capture "$DEVICE_TYPE" "$RUNTIME")"
           trap 'xcrun simctl delete "$UDID" || true' EXIT
           APP="$RUNNER_TEMP/DuoDerivedData/Build/Products/Debug-iphonesimulator/nabchat.app"
