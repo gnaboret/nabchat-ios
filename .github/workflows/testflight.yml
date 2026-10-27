@@ -31,9 +31,7 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew :shared:linkReleaseFrameworkIosArm64
-          mkdir -p shared/build/bin/iosSimulatorArm64/debugFramework
-          rm -rf shared/build/bin/iosSimulatorArm64/debugFramework/NabchatShared.framework
-          cp -R shared/build/bin/iosArm64/releaseFramework/NabchatShared.framework shared/build/bin/iosSimulatorArm64/debugFramework/NabchatShared.framework
+          ./gradlew :shared:linkDebugFrameworkIosSimulatorArm64
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project
@@ -43,6 +41,19 @@ jobs:
         run: |
           xcodebuild -version
           xcrun simctl list devicetypes | grep -F "iPhone Duo"
+      - name: Compile the complete app for iPhone Duo
+        working-directory: iosApp
+        run: >-
+          xcodebuild build
+          -project NabchatIOS.xcodeproj
+          -scheme NabchatIOS
+          -configuration Debug
+          -destination "platform=iOS Simulator,name=iPhone Duo"
+          CODE_SIGNING_ALLOWED=NO
+      - name: Select physical-device framework for App Store archive
+        run: |
+          rm -rf shared/build/bin/iosSimulatorArm64/debugFramework/NabchatShared.framework
+          cp -R shared/build/bin/iosArm64/releaseFramework/NabchatShared.framework shared/build/bin/iosSimulatorArm64/debugFramework/NabchatShared.framework
       - name: Install signing identity and profile
         env:
           CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
