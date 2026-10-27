@@ -36,7 +36,7 @@ jobs:
           APP="$RUNNER_TEMP/DuoDerivedData/Build/Products/Debug-iphonesimulator/nabchat.app"
           mkdir -p AppStoreScreenshots/iPhone-Duo
           xcrun simctl boot "$DEVICE" || true
-          xcrun simctl bootstatus "$DEVICE" -b
+          sleep 30
           xcrun simctl install "$DEVICE" "$APP"
           for MODE in river rooms rug settings; do
             xcrun simctl terminate "$DEVICE" com.nabchat.app || true
