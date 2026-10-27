@@ -32,12 +32,22 @@ jobs:
             CODE_SIGNING_ALLOWED=NO
       - name: Capture native Duo screenshots
         run: |
-          UDID="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone Duo \(/ {print $2; exit}')"
-          test -n "$UDID"
+          DEVICE_TYPE="$(xcrun simctl list devicetypes | awk -F '[()]' '/iPhone Duo \(/ {print $2; exit}')"
+          RUNTIME="$(xcrun simctl list runtimes | awk '/iOS 27/ {print $NF; exit}')"
+          test -n "$DEVICE_TYPE"
+          test -n "$RUNTIME"
+          UDID="$(xcrun simctl create Nabchat-Duo-Capture "$DEVICE_TYPE" "$RUNTIME")"
+          trap 'xcrun simctl delete "$UDID" || true' EXIT
           APP="$RUNNER_TEMP/DuoDerivedData/Build/Products/Debug-iphonesimulator/nabchat.app"
           mkdir -p AppStoreScreenshots/iPhone-Duo
-          xcrun simctl boot "$UDID" >/dev/null 2>&1 &
-          sleep 45
+          xcrun simctl boot "$UDID"
+          for ATTEMPT in $(seq 1 60); do
+            if xcrun simctl list devices | grep "$UDID" | grep -q '(Booted)'; then
+              break
+            fi
+            sleep 2
+          done
+          xcrun simctl list devices | grep "$UDID" | grep -q '(Booted)'
           perl -e '$SIG{ALRM}=sub{die "command timed out\n"}; alarm shift @ARGV; exec @ARGV' 60 xcrun simctl install "$UDID" "$APP"
           for MODE in river rooms rug settings; do
             xcrun simctl terminate "$UDID" com.nabchat.app || true
