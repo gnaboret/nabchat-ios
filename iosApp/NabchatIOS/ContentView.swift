@@ -27,6 +27,23 @@ private enum AppSection: String {
     }
 }
 
+private enum AppStoreScreenshotMode {
+    static let value = ProcessInfo.processInfo.environment["NABCHAT_SCREENSHOT_MODE"]
+    static var isEnabled: Bool { value != nil }
+    static var initialMode: ChatMode {
+        switch value {
+        case "rooms": return .rooms
+        case "rug": return .rug
+        default: return .river
+        }
+    }
+    static let demoChannels = [
+        Channel(name: "Sam", shortName: "S", platform: .kick),
+        Channel(name: "Nickwhite", shortName: "N", platform: .kick),
+        Channel(name: "clavicular", shortName: "C", platform: .kick)
+    ]
+}
+
 enum Platform: String, Codable, CaseIterable {
     case kick, twitch, youtube
     var color: Color {
@@ -244,7 +261,7 @@ enum NabColors {
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
-    private static let starterChannels: [Channel] = []
+    private static let starterChannels: [Channel] = AppStoreScreenshotMode.isEnabled ? AppStoreScreenshotMode.demoChannels : []
 
     @AppStorage("savedChannels") private var savedChannels = ""
     @AppStorage("savedChatters") private var savedChattersData = ""
@@ -266,10 +283,10 @@ struct ContentView: View {
     @StateObject private var twitchAuth = TwitchAuthService()
     @StateObject private var store = StoreManager()
     @StateObject private var ads = AdManager()
-    @State private var mode: ChatMode = .river
+    @State private var mode: ChatMode = AppStoreScreenshotMode.initialMode
     @State private var section: AppSection = .chat
     @State private var selectedChannels: Set<UUID> = []
-    @State private var showingSettings = false
+    @State private var showingSettings = AppStoreScreenshotMode.value == "settings"
     @State private var showingAddChannel = false
     @State private var inspectedMessage: ChatMessage?
     @State private var inspectedChannel: Channel?
@@ -377,6 +394,7 @@ struct ContentView: View {
             refreshProviders()
         }
         .task {
+            guard !AppStoreScreenshotMode.isEnabled else { return }
             // Let the window and root view controller finish attaching before
             // UMP presents consent UI or the ads SDK initializes.
             try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -449,7 +467,7 @@ struct ContentView: View {
             Text("Their saved label and highlight color will be removed. Stored chat history is not deleted.")
         }
         .fullScreenCover(isPresented: Binding(
-            get: { !hasCompletedOnboarding },
+            get: { !hasCompletedOnboarding && !AppStoreScreenshotMode.isEnabled },
             set: { if !$0 { hasCompletedOnboarding = true } }
         )) {
             OnboardingView { hasCompletedOnboarding = true }
