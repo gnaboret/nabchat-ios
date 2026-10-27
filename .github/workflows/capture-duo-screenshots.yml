@@ -32,17 +32,18 @@ jobs:
             CODE_SIGNING_ALLOWED=NO
       - name: Capture native Duo screenshots
         run: |
-          DEVICE="iPhone Duo"
+          UDID="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone Duo \(/ {print $2; exit}')"
+          test -n "$UDID"
           APP="$RUNNER_TEMP/DuoDerivedData/Build/Products/Debug-iphonesimulator/nabchat.app"
           mkdir -p AppStoreScreenshots/iPhone-Duo
-          xcrun simctl boot "$DEVICE" || true
-          sleep 30
-          xcrun simctl install "$DEVICE" "$APP"
+          xcrun simctl boot "$UDID" >/dev/null 2>&1 &
+          sleep 45
+          perl -e '$SIG{ALRM}=sub{die "command timed out\n"}; alarm shift @ARGV; exec @ARGV' 60 xcrun simctl install "$UDID" "$APP"
           for MODE in river rooms rug settings; do
-            xcrun simctl terminate "$DEVICE" com.nabchat.app || true
-            SIMCTL_CHILD_NABCHAT_SCREENSHOT_MODE="$MODE" xcrun simctl launch "$DEVICE" com.nabchat.app
+            xcrun simctl terminate "$UDID" com.nabchat.app || true
+            SIMCTL_CHILD_NABCHAT_SCREENSHOT_MODE="$MODE" perl -e '$SIG{ALRM}=sub{die "command timed out\n"}; alarm shift @ARGV; exec @ARGV' 30 xcrun simctl launch "$UDID" com.nabchat.app
             sleep 18
-            xcrun simctl io "$DEVICE" screenshot "AppStoreScreenshots/iPhone-Duo/nabchat-duo-$MODE.png"
+            perl -e '$SIG{ALRM}=sub{die "command timed out\n"}; alarm shift @ARGV; exec @ARGV' 30 xcrun simctl io "$UDID" screenshot "AppStoreScreenshots/iPhone-Duo/nabchat-duo-$MODE.png"
           done
       - name: Upload screenshots
         uses: actions/upload-artifact@v5
